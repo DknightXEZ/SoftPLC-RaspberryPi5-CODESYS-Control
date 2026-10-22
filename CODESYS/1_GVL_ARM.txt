@@ -1,0 +1,13 @@
+VAR_GLOBAL
+    // ---- แมปกับ channel ของ Modbus Server COM Port ----
+    awWr       : ARRAY[0..9]  OF WORD;      // CODESYS -> Arduino : Write Multiple Registers (FC16) offset 0 length 10
+    awRd       : ARRAY[0..16] OF WORD;      // Arduino -> CODESYS : Read Holding Registers (FC03) offset 10 length 17
+    // ---- ค่าที่แปลงเป็นองศาแล้ว ใช้ในโปรแกรมและหน้า Visu ----
+    alrAct     : ARRAY[0..5] OF LREAL;      // ตำแหน่งปัจจุบัน J1..J6 [องศา]
+    alrTgt     : ARRAY[0..5] OF LREAL;      // เป้าหมายที่ Arduino กำลังวิ่งไป [องศา]
+    alrCmd     : ARRAY[0..5] OF LREAL;      // เป้าหมายที่จะส่งไปพร้อมคำสั่ง MOVE [องศา]
+END_VAR
+VAR_GLOBAL RETAIN
+    alrPoint   : ARRAY[1..20, 0..5] OF LREAL;   // จุดที่ Teach ไว้ [องศา]
+    axPointSet : ARRAY[1..20] OF BOOL;          // TRUE = จุดนั้นถูก Teach แล้ว
+END_VAR

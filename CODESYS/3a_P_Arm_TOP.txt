@@ -1,0 +1,42 @@
+PROGRAM P_Arm
+VAR
+    fbLink       : FB_ArmLink;
+    // ---- ปุ่มของหน้า Visu (แบบ Tap) หรือสั่ง TRUE จากตารางตัวแปร: โปรแกรมเคลียร์กลับเป็น FALSE ให้เอง ----
+    xBtnRequest  : BOOL;              // ขอสิทธิ์ควบคุม
+    xBtnRelease  : BOOL;              // คืนสิทธิ์ให้อินเตอร์เฟสบน PC
+    xBtnStop     : BOOL;              // หยุดทุกแกน และหยุดการวิ่งตามลำดับจุด
+    xBtnGoManual : BOOL;              // ไปยังองศาใน alrManual
+    xBtnTeach    : BOOL;              // บันทึกตำแหน่งปัจจุบันลงจุดที่ iPoint
+    xBtnGoPoint  : BOOL;              // ไปยังจุดที่ iPoint
+    xBtnFreeAll  : BOOL;              // ปลดล็อคทุกแกน (จับแขนขยับด้วยมือ)
+    xBtnLockAll  : BOOL;              // ล็อคทุกแกน
+    xBtnRunSeq   : BOOL;              // วิ่งจุด 1 ถึง iSeqLast ตามลำดับ
+    // ---- ค่าตั้ง ----
+    alrManual    : ARRAY[0..5] OF LREAL;   // เป้าหมายที่พิมพ์เอง J1..J6 [องศา]
+    iPoint       : INT := 1;          // หมายเลขจุด 1..20
+    lrSpeed      : LREAL := 30.0;     // ความเร็ว 1..100 %
+    iSeqLast     : INT := 3;          // จุดสุดท้ายของลำดับ
+    xSeqLoop     : BOOL;              // TRUE = วนกลับไปจุด 1 เมื่อครบ
+    lrTol        : LREAL := 0.3;      // ถือว่าถึงเป้าเมื่อทุกแกนห่างเป้าไม่เกินค่านี้ [องศา]
+    tDwell       : TIME := T#500MS;   // หยุดรอที่แต่ละจุด
+    tMoveLimit   : TIME := T#120S;    // ถ้าไปไม่ถึงจุดภายในเวลานี้ ให้เลิกลำดับ
+    // ---- แสดงผล ----
+    xLinkOK      : BOOL;
+    xOwner       : BOOL;
+    xMoving      : BOOL;
+    xInPos       : BOOL;              // ทุกแกนอยู่ที่เป้าหมายที่สั่งล่าสุดและหยุดนิ่ง
+    xSeqRunning  : BOOL;
+    iSeqPoint    : INT;               // จุดที่กำลังไป
+    sMsg         : STRING(40);
+    // ---- ภายใน ----
+    xMoveCmd     : BOOL;
+    xStopCmd     : BOOL;
+    iSeqState    : INT;               // 0 = ส่งจุดถัดไป, 1 = รอ Arduino ตอบรับ, 2 = รอถึงเป้า
+    iSeqWait     : INT;
+    tonDwell     : TON;
+    tonMove      : TON;
+    rtCmdErr     : R_TRIG;
+    rtCmdDone    : R_TRIG;
+    lrErrMax     : LREAL;
+    i            : INT;
+END_VAR

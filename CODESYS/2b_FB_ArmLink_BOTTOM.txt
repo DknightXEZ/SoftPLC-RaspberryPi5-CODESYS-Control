@@ -1,0 +1,127 @@
+// ---------------- 1) สถานะจาก Arduino ----------------
+// TICK (awRd[3]) ต้องเปลี่ยนภายใน 500 ms จึงถือว่าลิงก์ยังดี
+IF GVL_ARM.awRd[3] <> wTickOld THEN
+    xTickSeen := TRUE;
+END_IF
+tonTick(IN := (GVL_ARM.awRd[3] = wTickOld), PT := T#500MS);
+wTickOld := GVL_ARM.awRd[3];
+xLinkOK  := xTickSeen AND NOT tonTick.Q;
+
+xOwner     := xLinkOK AND ((GVL_ARM.awRd[0] AND 16#0001) <> 0);
+xMoving    := (GVL_ARM.awRd[0] AND 16#0002) <> 0;
+xAnyFree   := (GVL_ARM.awRd[0] AND 16#0004) <> 0;
+xWdTripped := (GVL_ARM.awRd[0] AND 16#0008) <> 0;
+wFreeMask  := GVL_ARM.awRd[16];
+
+// ตำแหน่ง: รีจิสเตอร์เป็นจำนวนเต็มมีเครื่องหมาย หน่วย 0.1 องศา
+FOR i := 0 TO 5 DO
+    wTmp := GVL_ARM.awRd[4 + i];
+    IF (wTmp AND 16#8000) = 0 THEN
+        iTmp := WORD_TO_INT(wTmp);
+    ELSE
+        iTmp := WORD_TO_INT(wTmp AND 16#7FFF) - 32767 - 1;
+    END_IF
+    GVL_ARM.alrAct[i] := INT_TO_LREAL(iTmp) / 10.0;
+
+    wTmp := GVL_ARM.awRd[10 + i];
+    IF (wTmp AND 16#8000) = 0 THEN
+        iTmp := WORD_TO_INT(wTmp);
+    ELSE
+        iTmp := WORD_TO_INT(wTmp AND 16#7FFF) - 32767 - 1;
+    END_IF
+    GVL_ARM.alrTgt[i] := INT_TO_LREAL(iTmp) / 10.0;
+END_FOR
+
+// ---------------- 2) รับคำสั่งใหม่ (เก็บได้ 1 คำสั่ง, STOP แซงคำสั่งที่รออยู่) ----------------
+rtRequest(CLK := xRequest);
+rtRelease(CLK := xRelease);
+rtStop(CLK := xStop);
+rtMove(CLK := xMove);
+rtFree(CLK := xFree);
+rtLock(CLK := xLock);
+
+IF rtStop.Q THEN
+    iPending := 4;
+ELSIF iPending = 0 THEN
+    IF rtRequest.Q THEN
+        iPending := 1;
+    ELSIF rtRelease.Q THEN
+        iPending := 2;
+    ELSIF rtMove.Q THEN
+        iPending := 3;
+    ELSIF rtFree.Q THEN
+        iPending := 5;
+    ELSIF rtLock.Q THEN
+        iPending := 6;
+    END_IF
+END_IF
+
+// ---------------- 3) ส่งคำสั่ง ----------------
+// วางข้อมูลของคำสั่งลงในรีจิสเตอร์ก่อน แล้วอีก 2 รอบจึงเปลี่ยนเลขลำดับ (awWr[1])
+// Arduino ทำคำสั่งเมื่อเห็นเลขลำดับเปลี่ยน จึงไม่มีทางได้เลขลำดับใหม่คู่กับข้อมูลเก่า
+CASE iState OF
+0:
+    IF iPending <> 0 THEN
+        IF NOT xLinkOK THEN
+            iPending := 0;
+            iResult  := 101;
+            xBusy := FALSE;  xDone := FALSE;  xError := TRUE;
+        ELSE
+            GVL_ARM.awWr[0] := INT_TO_WORD(iPending);
+            IF iPending = 3 THEN
+                FOR i := 0 TO 5 DO
+                    lrTmp := LIMIT(-3276.0, GVL_ARM.alrCmd[i], 3276.0) * 10.0;
+                    iTmp  := LREAL_TO_INT(lrTmp);
+                    IF iTmp >= 0 THEN
+                        GVL_ARM.awWr[2 + i] := INT_TO_WORD(iTmp);
+                    ELSE
+                        GVL_ARM.awWr[2 + i] := INT_TO_WORD(iTmp + 32767 + 1) OR 16#8000;
+                    END_IF
+                END_FOR
+                GVL_ARM.awWr[8] := INT_TO_WORD(LREAL_TO_INT(LIMIT(0.0, lrSpeedPct, 1000.0)));
+            END_IF
+            GVL_ARM.awWr[9] := wAxisMask;
+            iPending := 0;
+            iWait    := 0;
+            xBusy := TRUE;  xDone := FALSE;  xError := FALSE;
+            iState := 1;
+        END_IF
+    END_IF
+
+1:
+    iWait := iWait + 1;
+    IF iWait >= 2 THEN
+        uiSeq := uiSeq + 1;
+        GVL_ARM.awWr[1] := UINT_TO_WORD(uiSeq);
+        tonAck(IN := FALSE);
+        iState := 2;
+    END_IF
+
+2:
+    tonAck(IN := TRUE, PT := T#1S);
+    IF GVL_ARM.awRd[1] = UINT_TO_WORD(uiSeq) THEN
+        iResult := WORD_TO_INT(GVL_ARM.awRd[2]);
+        xBusy := FALSE;  xDone := (iResult = 0);  xError := (iResult <> 0);
+        tonAck(IN := FALSE);
+        iState := 0;
+    ELSIF tonAck.Q THEN
+        iResult := 100;
+        xBusy := FALSE;  xDone := FALSE;  xError := TRUE;
+        tonAck(IN := FALSE);
+        iState := 0;
+    END_IF
+END_CASE
+
+CASE iResult OF
+0:   sResult := 'OK';
+1:   sResult := 'BUSY: arm is still moving';
+2:   sResult := 'NOT_OWNER: request control first';
+3:   sResult := 'RANGE: target, speed or mask invalid';
+4:   sResult := 'AXIS_FREE: lock the axis first';
+5:   sResult := 'BAD_CMD';
+6:   sResult := 'RESTARTED: Arduino was reset';
+100: sResult := 'NO_ACK: Arduino did not answer';
+101: sResult := 'NO_LINK: check Modbus wiring';
+ELSE
+    sResult := 'UNKNOWN';
+END_CASE

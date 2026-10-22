@@ -1,0 +1,44 @@
+FUNCTION_BLOCK FB_ArmLink
+VAR_INPUT
+    xRequest    : BOOL;               // ขอบขาขึ้น = ขอสิทธิ์ควบคุมแขน
+    xRelease    : BOOL;               // ขอบขาขึ้น = คืนสิทธิ์ให้อินเตอร์เฟสบน PC
+    xStop       : BOOL;               // ขอบขาขึ้น = หยุดทุกแกน (ทำได้แม้ไม่ได้ถือสิทธิ์)
+    xMove       : BOOL;               // ขอบขาขึ้น = ส่ง GVL_ARM.alrCmd เป็นเป้าหมายของแกนใน wAxisMask
+    xFree       : BOOL;               // ขอบขาขึ้น = ปลดล็อคแกนใน wAxisMask (จับแขนขยับด้วยมือได้)
+    xLock       : BOOL;               // ขอบขาขึ้น = ล็อคแกนใน wAxisMask
+    lrSpeedPct  : LREAL := 30.0;      // ความเร็ว 1..100 %
+    wAxisMask   : WORD := 16#003F;    // bit0..bit5 = J1..J6
+END_VAR
+VAR_OUTPUT
+    xLinkOK     : BOOL;               // Arduino ตอบ Modbus และยังทำงานอยู่
+    xOwner      : BOOL;               // TRUE = CODESYS เป็นผู้ควบคุม
+    xMoving     : BOOL;               // แขนกำลังเคลื่อนที่
+    xAnyFree    : BOOL;               // มีแกนที่ปลดล็อคอยู่
+    xWdTripped  : BOOL;               // Arduino เคยตัดสิทธิ์เพราะ CODESYS เงียบเกิน 1 วินาที
+    wFreeMask   : WORD;               // bit0..bit5 = แกนที่ปลดล็อคอยู่
+    xBusy       : BOOL;               // กำลังรอ Arduino ตอบรับคำสั่ง
+    xDone       : BOOL;               // Arduino รับคำสั่งล่าสุดแล้ว (ค้างจนสั่งคำสั่งใหม่)
+    xError      : BOOL;               // คำสั่งล่าสุดถูกปฏิเสธ ดู iResult
+    iResult     : INT;                // 0 OK, 1 BUSY, 2 NOT_OWNER, 3 RANGE, 4 AXIS_FREE, 5 BAD_CMD, 6 RESTARTED, 100 NO_ACK, 101 NO_LINK
+    sResult     : STRING(40);
+END_VAR
+VAR
+    rtRequest   : R_TRIG;
+    rtRelease   : R_TRIG;
+    rtStop      : R_TRIG;
+    rtMove      : R_TRIG;
+    rtFree      : R_TRIG;
+    rtLock      : R_TRIG;
+    tonTick     : TON;
+    tonAck      : TON;
+    wTickOld    : WORD;
+    xTickSeen   : BOOL;
+    iState      : INT;                // 0 = ว่าง, 1 = วางข้อมูลแล้ว รอก่อนเปลี่ยนเลขลำดับ, 2 = รอ Arduino ตอบรับ
+    iPending    : INT;                // คำสั่งที่รอส่ง (0 = ไม่มี)
+    iWait       : INT;
+    uiSeq       : UINT;
+    i           : INT;
+    iTmp        : INT;
+    wTmp        : WORD;
+    lrTmp       : LREAL;
+END_VAR

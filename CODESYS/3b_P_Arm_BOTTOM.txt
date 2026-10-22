@@ -1,0 +1,151 @@
+xMoveCmd := FALSE;
+xStopCmd := FALSE;
+iPoint   := LIMIT(1, iPoint, 20);
+iSeqLast := LIMIT(1, iSeqLast, 20);
+
+// ---------------- Teach: เก็บตำแหน่งปัจจุบันลงจุดที่เลือก ----------------
+IF xBtnTeach AND xLinkOK THEN
+    FOR i := 0 TO 5 DO
+        GVL_ARM.alrPoint[iPoint, i] := GVL_ARM.alrAct[i];
+    END_FOR
+    GVL_ARM.axPointSet[iPoint] := TRUE;
+    sMsg := 'point saved';
+END_IF
+
+// ---------------- สั่งไปตำแหน่งด้วยมือ (ไม่รับระหว่างวิ่งตามลำดับ) ----------------
+IF NOT xSeqRunning THEN
+    IF xBtnGoManual THEN
+        FOR i := 0 TO 5 DO
+            GVL_ARM.alrCmd[i] := alrManual[i];
+        END_FOR
+        xMoveCmd := TRUE;
+    ELSIF xBtnGoPoint THEN
+        IF GVL_ARM.axPointSet[iPoint] THEN
+            FOR i := 0 TO 5 DO
+                GVL_ARM.alrCmd[i] := GVL_ARM.alrPoint[iPoint, i];
+            END_FOR
+            xMoveCmd := TRUE;
+        ELSE
+            sMsg := 'point is empty';
+        END_IF
+    END_IF
+END_IF
+
+// ---------------- วิ่งตามลำดับจุด 1..iSeqLast ----------------
+IF xBtnRunSeq AND NOT xSeqRunning THEN
+    IF xOwner THEN
+        xSeqRunning := TRUE;
+        iSeqPoint   := 1;
+        iSeqState   := 0;
+        sMsg := 'sequence running';
+    ELSE
+        sMsg := 'request control first';
+    END_IF
+END_IF
+
+IF xBtnStop THEN
+    xStopCmd := TRUE;
+    IF xSeqRunning THEN
+        xSeqRunning := FALSE;
+        sMsg := 'sequence stopped';
+    END_IF
+END_IF
+
+IF xSeqRunning AND NOT xOwner THEN          // เสียสิทธิ์ควบคุมกลางทาง (PC ขอไป, watchdog หรือ Arduino รีเซ็ต)
+    xSeqRunning := FALSE;
+    sMsg := 'sequence aborted: control lost';
+END_IF
+
+IF xSeqRunning THEN
+    CASE iSeqState OF
+    0:
+        IF GVL_ARM.axPointSet[iSeqPoint] THEN
+            FOR i := 0 TO 5 DO
+                GVL_ARM.alrCmd[i] := GVL_ARM.alrPoint[iSeqPoint, i];
+            END_FOR
+            xMoveCmd  := TRUE;
+            iSeqWait  := 0;
+            iSeqState := 1;
+        ELSE
+            xSeqRunning := FALSE;
+            sMsg := 'sequence stopped: empty point';
+        END_IF
+    1:
+        iSeqWait := iSeqWait + 1;
+        IF iSeqWait >= 2 AND NOT fbLink.xBusy THEN
+            IF fbLink.xError THEN
+                xSeqRunning := FALSE;
+                sMsg := 'sequence aborted: move refused';
+            ELSE
+                tonDwell(IN := FALSE);
+                tonMove(IN := FALSE);
+                iSeqState := 2;
+            END_IF
+        END_IF
+    2:
+        tonMove(IN := TRUE, PT := tMoveLimit);
+        tonDwell(IN := xInPos, PT := tDwell);
+        IF tonDwell.Q THEN
+            tonDwell(IN := FALSE);
+            tonMove(IN := FALSE);
+            iSeqState := 0;
+            IF iSeqPoint < iSeqLast THEN
+                iSeqPoint := iSeqPoint + 1;
+            ELSIF xSeqLoop THEN
+                iSeqPoint := 1;
+            ELSE
+                xSeqRunning := FALSE;
+                sMsg := 'sequence finished';
+            END_IF
+        ELSIF tonMove.Q THEN
+            tonMove(IN := FALSE);
+            xSeqRunning := FALSE;
+            xStopCmd := TRUE;
+            sMsg := 'sequence aborted: point not reached';
+        END_IF
+    END_CASE
+END_IF
+
+// ---------------- คุยกับ Arduino ----------------
+fbLink(
+    xRequest   := xBtnRequest,
+    xRelease   := xBtnRelease,
+    xStop      := xStopCmd,
+    xMove      := xMoveCmd,
+    xFree      := xBtnFreeAll,
+    xLock      := xBtnLockAll,
+    lrSpeedPct := lrSpeed,
+    wAxisMask  := 16#003F);
+
+xLinkOK := fbLink.xLinkOK;
+xOwner  := fbLink.xOwner;
+xMoving := fbLink.xMoving;
+
+// ถึงเป้าเมื่อหยุดนิ่ง ไม่มีคำสั่งค้าง และทุกแกนห่างจากเป้าที่สั่งล่าสุดไม่เกิน lrTol
+lrErrMax := 0.0;
+FOR i := 0 TO 5 DO
+    lrErrMax := MAX(lrErrMax, ABS(GVL_ARM.alrAct[i] - GVL_ARM.alrCmd[i]));
+END_FOR
+xInPos := xLinkOK AND NOT xMoving AND NOT fbLink.xBusy AND (lrErrMax <= lrTol);
+
+// ข้อความผลของคำสั่งล่าสุด (แสดงครั้งเดียวตอนคำสั่งจบ เพื่อไม่ทับข้อความอื่น)
+rtCmdErr(CLK := fbLink.xError);
+rtCmdDone(CLK := fbLink.xDone);
+IF NOT xSeqRunning THEN
+    IF rtCmdErr.Q THEN
+        sMsg := fbLink.sResult;
+    ELSIF rtCmdDone.Q THEN
+        sMsg := 'command accepted';
+    END_IF
+END_IF
+
+// ---------------- ปล่อยปุ่ม ----------------
+xBtnRequest  := FALSE;
+xBtnRelease  := FALSE;
+xBtnStop     := FALSE;
+xBtnGoManual := FALSE;
+xBtnTeach    := FALSE;
+xBtnGoPoint  := FALSE;
+xBtnFreeAll  := FALSE;
+xBtnLockAll  := FALSE;
+xBtnRunSeq   := FALSE;
