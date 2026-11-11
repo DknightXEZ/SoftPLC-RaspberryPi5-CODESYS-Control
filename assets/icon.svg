@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#16324F"/>
+      <stop offset="1" stop-color="#0B1A2B"/>
+    </linearGradient>
+    <linearGradient id="link" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#C9D6E3"/>
+    </linearGradient>
+  </defs>
+  <rect x="32" y="32" width="960" height="960" rx="210" fill="url(#bg)"/>
+  <!-- grid floor -->
+  <g stroke="#2E5277" stroke-width="6" opacity="0.7">
+    <line x1="150" y1="830" x2="874" y2="830"/>
+    <line x1="210" y1="880" x2="814" y2="880"/>
+  </g>
+  <!-- target point -->
+  <circle cx="770" cy="760" r="34" fill="none" stroke="#35C2B0" stroke-width="12"/>
+  <circle cx="770" cy="760" r="10" fill="#35C2B0"/>
+  <!-- base -->
+  <rect x="250" y="760" width="230" height="56" rx="18" fill="url(#link)"/>
+  <rect x="300" y="690" width="130" height="84" rx="22" fill="url(#link)"/>
+  <!-- lower arm (J2 to J3) -->
+  <g stroke="url(#link)" stroke-linecap="round" fill="none">
+    <line x1="365" y1="660" x2="430" y2="330" stroke-width="92"/>
+    <!-- upper arm (J3 to wrist) -->
+    <line x1="430" y1="330" x2="700" y2="420" stroke-width="72"/>
+  </g>
+  <!-- wrist/tool -->
+  <line x1="700" y1="420" x2="760" y2="600" stroke="#C9D6E3" stroke-width="44" stroke-linecap="round"/>
+  <path d="M735 600 L785 600 L770 680 L750 680 Z" fill="#35C2B0"/>
+  <!-- joints -->
+  <g fill="#0B1A2B" stroke="#35C2B0" stroke-width="16">
+    <circle cx="365" cy="660" r="46"/>
+    <circle cx="430" cy="330" r="50"/>
+    <circle cx="700" cy="420" r="38"/>
+  </g>
+  <g fill="#35C2B0">
+    <circle cx="365" cy="660" r="14"/>
+    <circle cx="430" cy="330" r="16"/>
+    <circle cx="700" cy="420" r="12"/>
+  </g>
+  <!-- signal arc (control) -->
+  <g fill="none" stroke="#F5A524" stroke-width="16" stroke-linecap="round">
+    <path d="M190 260 A110 110 0 0 1 300 150"/>
+    <path d="M140 260 A160 160 0 0 1 300 100" opacity="0.6"/>
+  </g>
+  <circle cx="300" cy="260" r="20" fill="#F5A524"/>
+</svg>

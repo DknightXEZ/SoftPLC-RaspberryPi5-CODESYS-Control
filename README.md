@@ -1,128 +1,281 @@
-# SoftPLC-RaspberryPi5-CODESYS-Control
+<p align="center">
+  <img src="assets/icon_256.png" width="128" alt="Robot Arm Controller icon">
+</p>
 
-# ระบบควบคุมเชิงตำแหน่งสำหรับแขนกล 6 แกนด้วย CODESYS (6-DOF Robotic Arm Position Control with CODESYS & Raspberry Pi 5)
+<h1 align="center">SoftPLC-RaspberryPi5-CODESYS-Control</h1>
 
-โปรเจกต์นี้ออกแบบและพัฒนาระบบควบคุมการเคลื่อนที่เชิงตำแหน่งสำหรับหุ่นยนต์แขนกล 6 แกน (โครงสร้างพื้นฐาน AR4) โดยใช้คอมพิวเตอร์บอร์ดเดี่ยว **Raspberry Pi 5** ทำหน้าที่เป็นพีแอลซีแบบซอฟต์แวร์ (**Soft-PLC**) ร่วมกับแพลตฟอร์ม **CODESYS** ตามมาตรฐานอุตสาหกรรม **IEC 61131-3** (ภาษา Structured Text) เชื่อมต่อสื่อสารผ่านโปรโตคอล **Modbus RTU** ไปยังบอร์ดไมโครคอนโทรลเลอร์ **Arduino Mega 2560** เพื่อสร้างสัญญาณพัลส์ความถี่สูงขับสเต็ปปิ้งมอเตอร์ทั้ง 6 แกน และอ่านค่ามุมจากเซนเซอร์แม่เหล็กความละเอียดสูง **AS5600**
+<p align="center">
+  ระบบควบคุมเชิงตำแหน่งสำหรับแขนกล 6 แกนด้วย CODESYS บน Raspberry Pi 5<br>
+  <i>6-DOF Robotic Arm Position Control with CODESYS Soft-PLC on Raspberry Pi 5</i>
+</p>
 
-## สถาปัตยกรรมของระบบ (System Architecture)
+<p align="center">
+  <img src="https://img.shields.io/badge/CODESYS-V3.5%20SP21-2B6CB0" alt="CODESYS">
+  <img src="https://img.shields.io/badge/IEC%2061131--3-Structured%20Text-4A5568" alt="IEC 61131-3">
+  <img src="https://img.shields.io/badge/Raspberry%20Pi-5-C51A4A" alt="Raspberry Pi 5">
+  <img src="https://img.shields.io/badge/Arduino-Mega%202560-00979D" alt="Arduino Mega 2560">
+  <img src="https://img.shields.io/badge/Modbus-RTU-718096" alt="Modbus RTU">
+</p>
 
-ระบบแบ่งการทำงานออกเป็น 3 ส่วนหลัก เพื่อแก้ข้อจำกัดด้านเวลาสแกนรอบ (Cycle Time 10 ms) ของ Soft-PLC ในการสร้างพัลส์ความถี่สูง:
+---
 
-1. **หน่วยควบคุมระดับบน (Upper-Level Soft-PLC — Raspberry Pi 5)**:
+## สารบัญ
 
-   * รันไทม์ `CODESYS Control for Raspberry Pi 64 SL (v4.22.0.0)`
+- [ภาพรวม](#ภาพรวม)
+- [สถาปัตยกรรมของระบบ](#สถาปัตยกรรมของระบบ)
+- [โครงสร้างไฟล์](#โครงสร้างไฟล์)
+- [อุปกรณ์ที่ใช้](#อุปกรณ์ที่ใช้)
+- [การติดตั้ง](#การติดตั้ง)
+- [วิธีใช้งาน](#วิธีใช้งาน)
+- [ข้อควรระวังและการแก้ปัญหา](#ข้อควรระวังและการแก้ปัญหา)
+- [ข้อมูลทางเทคนิค](#ข้อมูลทางเทคนิค)
+- [ที่มาและเครดิต](#ที่มาและเครดิต)
 
-   * ประมวลผลลอจิกหลักใน `MainTask` ทุก 10 มิลลิวินาที และอัปเดตหน้าจอ `VISU_TASK` ทุก 100 มิลลิวินาที
+---
 
-   * ทำหน้าที่เป็น **Modbus RTU Client** ส่งมุมเป้าหมาย ความเร็ว และรหัสคำสั่งผ่านตัวแปลง USB-to-TTL (`CH340`) ทุก 20 มิลลิวินาที
+## ภาพรวม
 
-   * ให้บริการส่วนต่อประสานผู้ใช้ผ่านเว็บเบราว์เซอร์ (**WebVisu**) ที่พอร์ต `8080`
+โปรเจกต์นี้พัฒนาระบบควบคุมการเคลื่อนที่เชิงตำแหน่งของแขนกล 6 แกน โดยใช้ **Raspberry Pi 5** เป็นพีแอลซีแบบซอฟต์แวร์ (**Soft-PLC**) ที่รัน **CODESYS** ตามมาตรฐาน **IEC 61131-3** และสื่อสารผ่าน **Modbus RTU** ไปยัง **Arduino Mega 2560** ซึ่งสร้างพัลส์ขับสเต็ปปิ้งมอเตอร์ทั้ง 6 แกน และอ่านมุมจากเซนเซอร์แม่เหล็ก **AS5600**
 
-2. **หน่วยควบคุมการเคลื่อนที่ (Motion Controller — Arduino Mega 2560)**:
+ระบบสั่งงานได้ 2 โหมด และสลับกันได้ โดยมีผู้ควบคุมได้ครั้งละหนึ่งฝั่ง
 
-   * ทำหน้าที่เป็น **Modbus RTU Slave (ID = 1)** บนพอร์ต `Serial1` (115,200 bps, 8N1) และรับคำสั่งข้อความผ่านพอร์ต `USB Serial` จากคอมพิวเตอร์
+| โหมด | สั่งงานผ่าน | เส้นทางคำสั่ง |
+|---|---|---|
+| **CODESYS** (โหมดหลัก) | หน้าจอ `Visu_Arm` บนเว็บเบราว์เซอร์ (WebVisu) | Browser → Raspberry Pi 5 (CODESYS) → Modbus RTU → Arduino |
+| **Arduino** | โปรแกรม **Robot Arm Controller** บนคอมพิวเตอร์ | PC → USB Serial → Arduino |
 
-   * สร้างสัญญาณ `STEP`, `DIR` และ `ENA` ขับไดรเวอร์สเต็ปปิ้งมอเตอร์ **DM542T** ทั้ง 6 แกนด้วยไลบรารี `AccelStepper` และ `MultiStepper` เพื่อให้ทุกแกนเริ่มและเข้าถึงตำแหน่งเป้าหมายพร้อมกัน
+<p align="center">
+  <img src="docs/images/robot_arm.jpg" height="320" alt="แขนกล 6 แกน">
+  &nbsp;
+  <img src="docs/images/visu_arm_webvisu.png" height="320" alt="หน้าจอ Visu_Arm">
+</p>
 
-   * อ่านค่ามุมเพลามอเตอร์แกน J1–J5 จากเซนเซอร์แม่เหล็ก **AS5600** (12 บิต, 4,096 ตำแหน่ง/รอบ) ผ่านวงจร I2C Multiplexer **TCA9548A** เพื่อกู้คืนตำแหน่งเมื่อเปิดเครื่องและติดตามท่าของแขนกลขณะปลดล็อคแกน (โหมด Free / Teach)
+---
 
-   * มีระบบจัดการสิทธิ์ผู้ควบคุม (**Control Ownership Arbitration**) ให้สั่งงานได้ครั้งละหนึ่งฝั่ง (PC หรือ CODESYS) พร้อมระบบความปลอดภัย **Watchdog 1 วินาที** และคำสั่งหยุดฉุกเฉิน (`STOP`) ที่รับได้จากทุกฝั่งเสมอ
+## สถาปัตยกรรมของระบบ
 
-3. **ส่วนติดต่อผู้ใช้และจำลองภาพ 3 มิติบนคอมพิวเตอร์ (Robot Arm Controller — PC GUI)**:
+<p align="center"><img src="docs/images/architecture.png" width="760" alt="สถาปัตยกรรมของระบบ"></p>
 
-   * พัฒนาด้วย Electron (HTML, CSS, JavaScript) และแสดงแบบจำลอง 3 มิติด้วย `three.js`
+1. **Raspberry Pi 5 — Soft-PLC (ตัวควบคุมระดับบน)**
+   - รันไทม์ `CODESYS Control for Raspberry Pi 64 SL`
+   - `MainTask` ทุก 10 ms และ `VISU_TASK` ทุก 100 ms
+   - เป็น **Modbus RTU Client** ส่งรหัสคำสั่ง มุมเป้าหมาย และความเร็วผ่านตัวแปลง `CH340` ทุก 20 ms
+   - ให้บริการหน้าจอ **WebVisu** ที่พอร์ต `8080`
+2. **Arduino Mega 2560 — Motion Controller**
+   - เป็น **Modbus RTU Slave (ID 1)** บน `Serial1` (115,200 bps, 8N1) และรับคำสั่งข้อความผ่าน USB Serial จากคอมพิวเตอร์
+   - ขับไดรเวอร์ **DM542T** ทั้ง 6 แกนด้วย `AccelStepper` / `MultiStepper` ให้ทุกแกนเริ่มและถึงเป้าหมายพร้อมกัน
+   - อ่านมุมเพลามอเตอร์ J1–J5 จาก **AS5600** ผ่าน I2C Multiplexer **TCA9548A**
+   - จัดการสิทธิ์ผู้ควบคุม (PC หรือ CODESYS) พร้อม **Watchdog 1 วินาที** และคำสั่ง `STOP` ที่รับได้จากทุกฝั่ง
+3. **Robot Arm Controller — โปรแกรมบนคอมพิวเตอร์**
+   - พัฒนาด้วย Electron (HTML, CSS, JavaScript) แสดงแบบจำลอง 3 มิติด้วย `three.js`
+   - Manual Joint Control, Master Teach, Program Studio (`MoveJ`, `MoveL`, `Loop`) และ Analytics บันทึกมุมสั่งเทียบมุมจริงเป็น CSV
 
-   * รองรับการสั่งงานแบบ Manual Joint Control, Master Teach Mode, Program Studio (`MoveJ`, `MoveL` ด้วยสมการจลนศาสตร์ผกผัน, `Loop`) และหน้า Analytics สำหรับบันทึกข้อมูลมุมสั่งเทียบกับมุมจริงเป็นไฟล์ CSV
+<details>
+<summary><b>แผนภาพการสลับสิทธิ์ผู้ควบคุม</b></summary>
+<p align="center"><img src="docs/images/ownership_state.png" width="640" alt="การสลับสิทธิ์ผู้ควบคุม"></p>
+</details>
 
-## โครงสร้างไฟล์ในโปรเจกต์ (Repository Structure)
+---
 
-| ชื่อไฟล์ | ประเภท / แพลตฟอร์ม | คำอธิบายหน้าที่การทำงาน | 
-| ----- | ----- | ----- | 
-| `1_GVL_ARM.txt` | CODESYS (GVL) | ประกาศตัวแปรส่วนกลาง (`GVL_ARM`) สำหรับแมปอาร์เรย์รีจิสเตอร์ Modbus (`awWr`, `awRd`), มุมปัจจุบัน (`alrAct`), มุมเป้าหมาย (`alrTgt`, `alrCmd`) และจุดที่บันทึกจากการสอนตำแหน่ง 20 จุด (`alrPoint` แบบ `RETAIN`) | 
-| `2a_FB_ArmLink_TOP.txt` | CODESYS (FB Declaration) | ส่วนประกาศตัวแปรอินพุต เอาต์พุต และตัวแปรภายในของบล็อกฟังก์ชัน `FB_ArmLink` | 
-| `2b_FB_ArmLink_BOTTOM.txt` | CODESYS (FB Body - ST) | ลอจิกของ `FB_ArmLink` สำหรับตรวจสอบสถานะลิงก์ (`TICK`), แปลงค่ารีจิสเตอร์ INT16 (หน่วย 0.1 องศา) เป็น `LREAL`, จัดคิวคำสั่ง และส่งเฟรมคำสั่งด้วยกลไก `CMD_SEQ` / `ACK_SEQ` | 
-| `3a_P_Arm_TOP.txt` | CODESYS (PRG Declaration) | ส่วนประกาศตัวแปรของโปรแกรมหลัก `P_Arm` สำหรับเชื่อมโยงกับปุ่มและไฟสถานะบนหน้าจอ `Visu_Arm` | 
-| `3b_P_Arm_BOTTOM.txt` | CODESYS (PRG Body - ST) | ลอจิกการทำงานหลักของ `P_Arm` ได้แก่ การสั่งเคลื่อนที่ด้วยมือ, การบันทึกจุด (`TEACH`), สเตตแมชชีนสำหรับการเคลื่อนที่ตามลำดับจุด (`RUN SEQ` / `LOOP`), การตรวจสอบการเข้าถึงตำแหน่งเป้าหมาย (`xInPos`) และการเรียกใช้ `FB_ArmLink` | 
-| `AR4_Controller_CODESYS.ino` | Arduino Mega 2560 (C++) | เฟิร์มแวร์หลักของบอร์ด Arduino Mega 2560 สำหรับตั้งค่าขาพิน, อ่านค่าเซนเซอร์ `AS5600` ผ่าน `TCA9548A`, จัดการข้อมูล `EEPROM`, รับคำสั่งผ่าน USB Serial และขับสเต็ปปิ้งมอเตอร์ 6 แกน | 
-| `CodesysLink.h` | Arduino Mega 2560 (C/C++ Header) | ไฟล์ส่วนหัวกำหนดค่าคงที่ของการสื่อสารกับ CODESYS (`Serial1`, Baud Rate `115200`, Slave ID `1`, Watchdog `1000 ms`) และต้นแบบฟังก์ชันเชื่อมต่อ | 
-| `CodesysLink.ino` | Arduino Mega 2560 (C++) | โมดูล Modbus RTU Slave (FC03, FC04, FC06, FC16 พร้อมการตรวจสอบ CRC-16), ระบบสลับสิทธิ์ผู้ควบคุมระหว่าง PC กับ CODESYS และระบบ Watchdog ตัดสิทธิ์อัตโนมัติ | 
+## โครงสร้างไฟล์
 
-## ข้อมูลจำเพาะและพารามิเตอร์ของข้อต่อ (Joint Parameters)
+```text
+SoftPLC-RaspberryPi5-CODESYS-Control/
+├── CODESYS/
+│   ├── 1_GVL_ARM.txt              ตัวแปรส่วนกลาง (แมปรีจิสเตอร์ Modbus, มุม, จุด Teach 20 จุด)
+│   ├── 2a_FB_ArmLink_TOP.txt      ส่วนประกาศตัวแปรของ FB_ArmLink
+│   ├── 2b_FB_ArmLink_BOTTOM.txt   ลอจิก FB_ArmLink (สถานะลิงก์, แปลงค่า, CMD_SEQ / ACK_SEQ)
+│   ├── 3a_P_Arm_TOP.txt           ส่วนประกาศตัวแปรของโปรแกรมหลัก P_Arm
+│   └── 3b_P_Arm_BOTTOM.txt        ลอจิก P_Arm (Manual, Teach, RUN SEQ / LOOP, xInPos)
+├── Arduino_Controller_CODESYS/
+│   ├── Arduino_Controller_CODESYS.ino   เฟิร์มแวร์หลัก (มอเตอร์, AS5600, EEPROM, USB Serial)
+│   ├── CodesysLink.h                    ค่าคงที่การสื่อสารกับ CODESYS
+│   └── CodesysLink.ino                  Modbus RTU Slave, สิทธิ์ผู้ควบคุม, Watchdog
+├── assets/                        ไอคอนโปรแกรม (SVG, PNG, ICO)
+└── docs/images/                   ภาพประกอบ README
+```
 
-| ข้อต่อ | อัตราทด ($G$) | พัลส์/รอบ ($P$) | พัลส์/องศา ($N$) | ความละเอียดการสั่ง (องศา/พัลส์) | ความละเอียด AS5600 ที่ข้อต่อ (องศา) | ความเร็วสูงสุด (องศา/วินาที) | ขอบเขตมุมทำงาน (องศา) | 
-| ----- | ----- | ----- | ----- | ----- | ----- | ----- | ----- | 
-| **J1** | 40 | 800 | 88.89 | 0.0113 | 0.0022 | 33.8 | \-75 ถึง +75 | 
-| **J2** | 50 | 800 | 111.11 | 0.0090 | 0.0018 | 27.0 | \-60 ถึง +60 | 
-| **J3** | 50 | 800 | 111.11 | 0.0090 | 0.0018 | 27.0 | \-60 ถึง +60 | 
-| **J4** | 44.8 | 800 | 99.56 | 0.0100 | 0.0020 | 30.1 | \-180 ถึง +180 | 
-| **J5** | 9.837 | 1600 | 43.72 | 0.0229 | 0.0089 | 68.6 | \-180 ถึง +180 | 
-| **J6** | 20 | 800 | 44.44 | 0.0225 | ไม่มีเซนเซอร์ | 67.5 | \-180 ถึง +180 | 
+---
 
-## การกำหนดขาเชื่อมต่อบอร์ด Arduino Mega 2560 (Pinout)
+## อุปกรณ์ที่ใช้
 
-| ขาพิน Arduino Mega 2560 | อุปกรณ์ที่เชื่อมต่อ | หน้าที่การทำงาน | 
-| ----- | ----- | ----- | 
-| `D2, D4, D6, D8, D10, D12` | `PUL` ของไดรเวอร์ DM542T (แกน J1–J6) | ส่งสัญญาณพัลส์ (`STEP`) ขับสเต็ปปิ้งมอเตอร์ | 
-| `D3, D5, D7, D9, D11, D13` | `DIR` ของไดรเวอร์ DM542T (แกน J1–J6) | กำหนดทิศทางการหมุนของแต่ละแกน | 
-| `D30, D31, D32, D33, D34, D35` | `ENA` ของไดรเวอร์ DM542T (แกน J1–J6) | ล็อคและปลดล็อคเพลาของมอเตอร์แต่ละแกน | 
-| `D20 (SDA), D21 (SCL)` | I2C Multiplexer `TCA9548A` (0x70) | บัสสื่อสาร I2C ความเร็ว 400 kHz | 
-| ช่อง `SD0, SD1, SD6, SD5, SD7` บน TCA9548A | เซนเซอร์แม่เหล็ก `AS5600` (0x36) แกน J1–J5 | วัดมุมเพลามอเตอร์ความละเอียด 12 บิต | 
-| `D18 (TX1), D19 (RX1)` | ตัวแปลง USB-to-TTL `CH340` $\rightarrow$ Raspberry Pi 5 | สื่อสารโปรโตคอล Modbus RTU (115200 bps, 8N1) | 
-| พอร์ต `USB-B` | คอมพิวเตอร์ (โปรแกรม Robot Arm Controller) | สื่อสารชุดคำสั่งข้อความผ่าน USB Serial (115200 bps) | 
+| อุปกรณ์ | จำนวน | หน้าที่ |
+|---|---|---|
+| แขนกล 6 แกน (AR2) พร้อมสเต็ปปิ้งมอเตอร์ | 1 | ตัวแขนกล |
+| ไดรเวอร์ DM542T | 6 | ขับมอเตอร์ตามสัญญาณ PUL / DIR / ENA |
+| Arduino Mega 2560 | 1 | สร้างพัลส์ อ่านเซนเซอร์ และเป็น Modbus Slave |
+| เซนเซอร์ AS5600 | 5 | วัดมุมเพลามอเตอร์ J1–J5 (J6 ไม่มีเซนเซอร์) |
+| TCA9548A | 1 | แยกบัส I2C ของ AS5600 ที่มีแอดเดรสเดียวกัน |
+| ตัวแปลง USB-to-TTL CH340 | 1 | เชื่อม Raspberry Pi 5 กับ `Serial1` ของ Arduino |
+| Raspberry Pi 5 + อะแดปเตอร์ USB-C 5 V / 5 A | 1 | Soft-PLC และ WebVisu |
+| คอมพิวเตอร์ Windows | 1 | CODESYS IDE และโปรแกรม Robot Arm Controller |
 
-## ตาราง Holding Registers ของ Modbus RTU (Slave ID = 1)
+---
 
-| รีจิสเตอร์ | ชื่อรีจิสเตอร์ | ทิศทาง (จากมุมมอง CODESYS) | รายละเอียดข้อมูล | 
-| ----- | ----- | ----- | ----- | 
-| `0` | `CMD_CODE` | เขียน (FC16) | รหัสคำสั่ง: `1`=REQUEST, `2`=RELEASE, `3`=MOVE, `4`=STOP, `5`=FREE, `6`=LOCK | 
-| `1` | `CMD_SEQ` | เขียน (FC16) | เลขลำดับคำสั่ง (เมื่อค่าเปลี่ยน Arduino จะประมวลผลคำสั่ง 1 ครั้ง) | 
-| `2–7` | `TARGET` | เขียน (FC16) | มุมเป้าหมายของข้อต่อ J1–J6 หน่วย 0.1 องศา (ชนิดข้อมูล `INT16`) | 
-| `8` | `SPEED` | เขียน (FC16) | ความเร็วในการเคลื่อนที่ 1–100 เปอร์เซ็นต์ | 
-| `9` | `AXIS_MASK` | เขียน (FC16) | บิตมาสก์เลือกแกน (บิต 0–5 แทนแกน J1–J6, ค่า `16#003F` = ทุกแกน) | 
-| `10` | `STATUS` | อ่าน (FC03) | บิต 0 = CODESYS ถือสิทธิ์, บิต 1 = กำลังเคลื่อนที่, บิต 2 = มีแกนปลดล็อค, บิต 3 = Watchdog ตัดสิทธิ์ | 
-| `11` | `ACK_SEQ` | อ่าน (FC03) | เลขลำดับ `CMD_SEQ` ล่าสุดที่ Arduino ประมวลผลเสร็จสิ้น | 
-| `12` | `RESULT` | อ่าน (FC03) | รหัสผลลัพธ์: `0`=OK, `1`=BUSY, `2`=NOT_OWNER, `3`=RANGE, `4`=AXIS_FREE, `5`=BAD_CMD, `6`=RESTARTED | 
-| `13` | `TICK` | อ่าน (FC03) | ตัวนับเวลาทำงานของ Arduino (เพิ่มขึ้นทุก 10 ms ใช้ตรวจสอบสถานะการเชื่อมต่อ) | 
-| `14–19` | `ACT` | อ่าน (FC03) | มุมปัจจุบันของข้อต่อ J1–J6 หน่วย 0.1 องศา (`INT16`) | 
-| `20–25` | `TGT` | อ่าน (FC03) | มุมเป้าหมายที่แขนกลกำลังเคลื่อนที่ไปของ J1–J6 หน่วย 0.1 องศา (`INT16`) | 
-| `26` | `FREE_MASK` | อ่าน (FC03) | บิตมาสก์แสดงแกนที่กำลังปลดล็อคอยู่ (บิต 0–5 แทนแกน J1–J6) | 
+## การติดตั้ง
 
-## ขั้นตอนการติดตั้งและใช้งาน (Setup & Usage)
+### 1) เฟิร์มแวร์ Arduino Mega 2560
 
-### 1. การอัปโหลดเฟิร์มแวร์ลงบอร์ด Arduino Mega 2560
+1. ติดตั้ง **Arduino IDE** และไลบรารี `AccelStepper` (มี `MultiStepper` อยู่ในชุดเดียวกัน)
+2. เปิดโฟลเดอร์ `Arduino_Controller_CODESYS/` (ชื่อโฟลเดอร์ต้องตรงกับไฟล์ `.ino` หลัก)
+3. เลือกบอร์ด **Arduino Mega or Mega 2560** แล้วกด Upload
 
-1. เปิดโปรแกรม **Arduino IDE** และติดตั้งไลบรารี `AccelStepper` (ซึ่งรวม `MultiStepper` ไว้ด้วย)
+### 2) Raspberry Pi 5
 
-2. นำไฟล์ `AR4_Controller_CODESYS.ino`, `CodesysLink.h` และ `CodesysLink.ino` ไว้ในโฟลเดอร์โปรเจกต์ชื่อ `AR4_Controller_CODESYS` เดียวกัน
+1. ติดตั้งรันไทม์ **CODESYS Control for Raspberry Pi 64 SL** ผ่านเครื่องมือ **Deploy Control SL** ใน CODESYS
+2. เสียบตัวแปลง `CH340` ที่พอร์ต USB ของ Pi (`/dev/ttyUSB0`) แล้วเพิ่มใน `/etc/codesyscontrol/CODESYSControl_User.cfg`
 
-3. เลือกบอร์ด **Arduino Mega or Mega 2560 (ATmega2560)** และอัปโหลดเฟิร์มแวร์ลงบอร์ด
-
-### 2. การตั้งค่าพอร์ตสื่อสารบน Raspberry Pi 5
-
-1. ติดตั้งรันไทม์ **CODESYS Control for Raspberry Pi 64 SL** ลงบน Raspberry Pi 5 ผ่านเครื่องมือ Deploy Control SL
-
-2. เชื่อมต่อตัวแปลง `CH340` เข้ากับพอร์ต USB ของ Raspberry Pi 5 (`/dev/ttyUSB0`) และเพิ่มการตั้งค่าต่อไปนี้ในไฟล์ `/etc/codesyscontrol/CODESYSControl_User.cfg`:
-
-   ```
+   ```ini
    [SysCom]
    Linux.Devicefile=/dev/ttyUSB
-   
    ```
+3. รีสตาร์ตรันไทม์ เพื่อให้พอร์ต `COM1` ในโปรเจกต์ชี้ไปที่ `/dev/ttyUSB0`
 
-3. รีสตาร์ตรันไทม์ CODESYS เพื่อให้พอร์ต `COM1` ในโปรเจกต์ชี้ไปยัง `/dev/ttyUSB0`
+### 3) โปรเจกต์ CODESYS V3.5
 
-### 3. การนำเข้าโค้ดและรันโปรแกรมบน CODESYS V3.5
+1. สร้าง `GVL_ARM`, Function Block `FB_ArmLink` และโปรแกรม `P_Arm` แล้วคัดลอกโค้ดจากโฟลเดอร์ `CODESYS/` (ไฟล์ `TOP` = ส่วนประกาศตัวแปร, `BOTTOM` = ส่วนลอจิก)
+2. เพิ่มอุปกรณ์ **Modbus COM** ที่ `COM1`, `115200`, `8N1`, Parity `NONE`
+3. ตั้งค่า **Modbus Slave Channel**
 
-1. สร้างโปรเจกต์ใน **CODESYS V3.5 SP21** และเพิ่มออบเจ็กต์ `GVL_ARM`, บล็อกฟังก์ชัน `FB_ArmLink` และโปรแกรมหลัก `P_Arm` โดยคัดลอกโค้ดจากไฟล์ `.txt` ในโปรเจกต์นี้ไปวางตามส่วนประกาศตัวแปร (TOP) และส่วนลอจิก (BOTTOM)
+   | ช่อง | Function Code | Offset | Length | Cyclic | แมปกับ |
+   |---|---|---|---|---|---|
+   | เขียน | 16 Write Multiple Registers | 0 | 10 | 20 ms | `GVL_ARM.awWr` |
+   | อ่าน | 03 Read Holding Registers | 10 | 17 | 20 ms | `GVL_ARM.awRd` |
+4. Login → Download → **Start**
+5. เปิด `http://<IP ของ Raspberry Pi 5>:8080/webvisu.htm`
 
-2. ตั้งค่าอุปกรณ์ **Modbus_COM** ที่พอร์ต `COM1`, ความเร็ว `115200 bps`, `Parity NONE`, `8 data bits`, `1 stop bit`
+---
 
-3. ตั้งค่า **Modbus Slave Channel**:
+## วิธีใช้งาน
 
-   * ช่องเขียน (WR): Function Code `16 (Write Multiple Registers)`, Offset `0`, Length `10`, Cyclic `20 ms` แมปเข้ากับ `Application.GVL_ARM.awWr`
+> [!IMPORTANT]
+> **ตั้งค่า HOME ใหม่ก่อนใช้งานทุกครั้งหลังเปิดเครื่อง** ระบบบันทึกตำแหน่งลง EEPROM เฉพาะตอนสั่ง `SAVE` หรือ `HOME` ไม่ได้บันทึกตลอดเวลา และ AS5600 อยู่ที่เพลามอเตอร์ จึงแก้ตำแหน่งตอนเปิดเครื่องได้เพียงภายในครึ่งรอบของมอเตอร์ ถ้าแขนขยับระหว่างปิดเครื่อง (เช่น J2/J3 ตก) ตำแหน่งจะคลาด
 
-   * ช่องอ่าน (RD): Function Code `03 (Read Holding Registers)`, Offset `10`, Length `17`, Cyclic `20 ms` แมปเข้ากับ `Application.GVL_ARM.awRd`
+### เปิดเครื่อง
 
-4. ดาวน์โหลดโปรแกรมลงสู่ Raspberry Pi 5 และกด **Start (RUN)**
+1. วางแขนกลบนพื้นผิวแข็งแรง ยึดฐานให้แน่น เว้นพื้นที่รอบแขนอย่างน้อย 1 เมตร
+2. ต่อสาย: USB-B จาก Arduino → คอมพิวเตอร์, CH340 → Raspberry Pi 5 และต่อ Pi เข้าเครือข่ายเดียวกับคอมพิวเตอร์
+3. จัดแขนกลอยู่ในท่า Home (ทุกข้อต่อ 0°) → เปิด Raspberry Pi 5 และเสียบ USB ของ Arduino → เปิดไฟมอเตอร์เป็นลำดับสุดท้าย
+4. ผู้ควบคุมเริ่มต้นคือโปรแกรมบนคอมพิวเตอร์ (โหมด Arduino)
 
-5. เปิดเว็บเบราว์เซอร์ไปที่ `http://<IP ของ Raspberry Pi 5>:8080/webvisu.htm` เพื่อสั่งงานแขนกลผ่านหน้าจอ **Visu_Arm**
+### โหมด Arduino — Robot Arm Controller
+
+<p align="center"><img src="docs/images/app_main.png" width="720" alt="Robot Arm Controller"></p>
+
+1. กด **Scan** เลือกพอร์ต แล้วกด **Connect Arduino**
+2. ตรวจว่าแขนอยู่ในท่า Home → กด **Set Current as Home** และ **Save Position to Memory (EEPROM)**
+3. ขยับทีละแกนด้วยสไลเดอร์หรือปุ่ม − / + ใน *Manual Joint Control* โดยเริ่มจากความเร็วต่ำ
+4. บันทึกท่าด้วย **Save Waypoint** แล้วสร้างโปรแกรมใน **Program Studio** และบันทึกข้อมูลใน **Analytics**
+
+<p align="center">
+  <img src="docs/images/app_program_studio.png" width="420" alt="Program Studio">
+  &nbsp;
+  <img src="docs/images/app_analytics.png" width="420" alt="Analytics">
+</p>
+
+### โหมด CODESYS — Visu_Arm
+
+1. เปิด `http://<IP ของ Raspberry Pi>:8080/webvisu.htm`
+2. กด **REQUEST** (หรือส่งสิทธิ์จากโปรแกรมบนคอมพิวเตอร์) เมื่อไฟ **LINK** และ **CODESYS OWNS** ติด แสดงว่าพร้อมสั่งงาน
+3. ตั้ง **SPEED** แล้วป้อนมุมในช่อง **TARGET** และกด **GO TO TARGET** หรือใช้ **JOG − / JOG +**
+4. **TEACH** บันทึกได้ 20 จุด, **GO POINT** ไปยังจุด, **RUN SEQ** / **LOOP** วิ่งตามลำดับจุด
+5. เลิกใช้งานกด **RELEASE** เพื่อคืนสิทธิ์ให้คอมพิวเตอร์
+
+### ปิดเครื่อง
+
+1. สั่งแขนกลับท่า Home และรอให้หยุดนิ่ง
+2. ในโหมด Arduino กด **Save Position to Memory (EEPROM)**
+3. ปิดไฟมอเตอร์ → กด Disconnect ในโปรแกรม → กดปุ่มเปิด/ปิดบน Raspberry Pi 5
+
+---
+
+## ข้อควรระวังและการแก้ปัญหา
+
+- กด **STOP** ได้ทุกเวลาจากทั้งสองโหมด เพื่อหยุดทุกแกนทันที
+- สลับโหมดได้เฉพาะเมื่อแขนหยุดนิ่ง ถ้า CODESYS ขาดการสื่อสารเกิน 1 วินาที แขนจะหยุดและคืนสิทธิ์ให้คอมพิวเตอร์อัตโนมัติ
+- ก่อนกด **FREE** ต้องประคองแขนไว้ เพราะข้อต่อจะไม่มีแรงยึด
+- ห้ามบุคคลเข้าใกล้ในระยะ 1 เมตรขณะแขนทำงาน
+
+| ข้อความ (MSG) | ความหมายและวิธีแก้ |
+|---|---|
+| `BUSY` | แขนยังเคลื่อนที่อยู่ รอให้หยุดแล้วสั่งใหม่ |
+| `NOT_OWNER` | CODESYS ยังไม่ได้ถือสิทธิ์ กด REQUEST ก่อน |
+| `RANGE` | มุม ความเร็ว หรือแกนเกินขอบเขต |
+| `AXIS_FREE` | มีแกนที่ปลดล็อกอยู่ กด LOCK ALL ก่อน |
+| `RESTARTED` | Arduino ถูกรีเซ็ต กด REQUEST อีกครั้ง |
+| `NO_ACK` / `NO_LINK` | สื่อสารกับ Arduino ไม่ได้ ตรวจไฟและสาย CH340 |
+| เปิด WebVisu ไม่ได้ | ตรวจว่าอยู่เครือข่ายเดียวกัน และใช้ IP ปัจจุบันของ Pi |
+
+---
+
+## ข้อมูลทางเทคนิค
+
+<details>
+<summary><b>พารามิเตอร์ของข้อต่อ</b></summary>
+
+| ข้อต่อ | อัตราทด G | พัลส์/รอบ P | พัลส์/องศา N | ความละเอียดการสั่ง (°/พัลส์) | ความละเอียด AS5600 ที่ข้อต่อ (°) | ความเร็วสูงสุด (°/s) | ขอบเขตมุม (°) |
+|---|---|---|---|---|---|---|---|
+| J1 | 40 | 800 | 88.89 | 0.0113 | 0.0022 | 33.8 | −75 ถึง +75 |
+| J2 | 50 | 800 | 111.11 | 0.0090 | 0.0018 | 27.0 | −60 ถึง +60 |
+| J3 | 50 | 800 | 111.11 | 0.0090 | 0.0018 | 27.0 | −60 ถึง +60 |
+| J4 | 44.8 | 800 | 99.56 | 0.0100 | 0.0020 | 30.1 | −180 ถึง +180 |
+| J5 | 9.837 | 1600 | 43.72 | 0.0229 | 0.0089 | 68.6 | −180 ถึง +180 |
+| J6 | 20 | 800 | 44.44 | 0.0225 | ไม่มีเซนเซอร์ | 67.5 | −180 ถึง +180 |
+
+</details>
+
+<details>
+<summary><b>การต่อขา Arduino Mega 2560</b></summary>
+
+| ขา | ต่อกับ | หน้าที่ |
+|---|---|---|
+| D2, D4, D6, D8, D10, D12 | PUL ของ DM542T (J1–J6) | พัลส์ STEP |
+| D3, D5, D7, D9, D11, D13 | DIR ของ DM542T (J1–J6) | ทิศทาง |
+| D30–D35 | ENA ของ DM542T (J1–J6) | ล็อก / ปลดล็อกแกน |
+| D20 (SDA), D21 (SCL) | TCA9548A (0x70) | I2C 400 kHz |
+| SD0, SD1, SD6, SD5, SD7 บน TCA9548A | AS5600 (0x36) J1–J5 | วัดมุมเพลามอเตอร์ 12 บิต |
+| D18 (TX1), D19 (RX1) | CH340 → Raspberry Pi 5 | Modbus RTU 115200 8N1 |
+| USB-B | คอมพิวเตอร์ | USB Serial 115200 |
+
+<p align="center"><img src="docs/images/wiring.png" width="640" alt="แผนผังการต่อสาย"></p>
+
+</details>
+
+<details>
+<summary><b>ตาราง Holding Registers ของ Modbus (Slave ID 1)</b></summary>
+
+| รีจิสเตอร์ | ชื่อ | ทิศทาง (มุมมอง CODESYS) | รายละเอียด |
+|---|---|---|---|
+| 0 | `CMD_CODE` | เขียน (FC16) | 1=REQUEST, 2=RELEASE, 3=MOVE, 4=STOP, 5=FREE, 6=LOCK |
+| 1 | `CMD_SEQ` | เขียน (FC16) | เลขลำดับคำสั่ง (ค่าเปลี่ยน = ทำคำสั่ง 1 ครั้ง) |
+| 2–7 | `TARGET` | เขียน (FC16) | มุมเป้าหมาย J1–J6 หน่วย 0.1° (INT16) |
+| 8 | `SPEED` | เขียน (FC16) | ความเร็ว 1–100 % |
+| 9 | `AXIS_MASK` | เขียน (FC16) | บิต 0–5 = J1–J6 (`16#003F` = ทุกแกน) |
+| 10 | `STATUS` | อ่าน (FC03) | บิต 0 CODESYS ถือสิทธิ์, 1 กำลังเคลื่อนที่, 2 มีแกนปลดล็อก, 3 Watchdog ตัดสิทธิ์ |
+| 11 | `ACK_SEQ` | อ่าน (FC03) | CMD_SEQ ล่าสุดที่ทำเสร็จ |
+| 12 | `RESULT` | อ่าน (FC03) | 0=OK, 1=BUSY, 2=NOT_OWNER, 3=RANGE, 4=AXIS_FREE, 5=BAD_CMD, 6=RESTARTED |
+| 13 | `TICK` | อ่าน (FC03) | ตัวนับเวลาของ Arduino ใช้ตรวจลิงก์ |
+| 14–19 | `ACT` | อ่าน (FC03) | มุมปัจจุบัน J1–J6 หน่วย 0.1° |
+| 20–25 | `TGT` | อ่าน (FC03) | มุมเป้าหมายที่กำลังวิ่ง J1–J6 หน่วย 0.1° |
+| 26 | `FREE_MASK` | อ่าน (FC03) | แกนที่ปลดล็อกอยู่ |
+
+</details>
+
+<details>
+<summary><b>ผลการทดสอบ</b></summary>
+
+ทดสอบกับแขนกลจริงในโหมด Arduino 2 ชุด ชุดละ 30 รอบ ความคลาดเคลื่อนขณะเคลื่อนที่เฉลี่ย −0.12 ถึง +0.38° (สูงสุดไม่เกิน 1.49°) เมื่อหยุดที่เป้าหมายเป็น 0.00° ทุกแกน และใช้เวลาเคลื่อนที่ 4.26 ± 0.05 วินาที
+
+<p align="center"><img src="docs/images/repeatability_test.png" width="640" alt="ผลการทดสอบ 30 รอบ"></p>
+
+</details>
+
+---
+
+## ที่มาและเครดิต
+
+- ตัวแขนกลและแบบจำลองสามมิติใช้แขนกล **AR2** ของ [Annin Robotics](https://www.anninrobotics.com/) (Chris Annin) ซึ่งเผยแพร่แบบโอเพนซอร์สใน [Chris-Annin/AR2](https://github.com/Chris-Annin/AR2) สำหรับการใช้งานที่ไม่ใช่เชิงพาณิชย์ ค่าพารามิเตอร์ DH อ้างอิงจาก *AR2 kinematic model* ในคลังข้อมูลดังกล่าว
+- ระบบควบคุม (CODESYS, เฟิร์มแวร์ Arduino และโปรแกรม Robot Arm Controller) พัฒนาเป็นส่วนหนึ่งของปริญญานิพนธ์ **การพัฒนาระบบควบคุมเชิงตำแหน่งสำหรับแขนกล 6 แกนด้วย CODESYS** สาขาวิชาวิศวกรรมหุ่นยนต์ คณะวิศวกรรมศาสตร์และเทคโนโลยีอุตสาหกรรม มหาวิทยาลัยราชภัฏสวนสุนันทา (2569)
+  - ผู้พัฒนา: นายดุลยวัต ปุญญรัตนศรีขจร และนายวุฒิพร มากมี
+  - อาจารย์ที่ปรึกษา: ผศ. ดร.ปฏิญญา สมานุหัตถ์ · อาจารย์ที่ปรึกษาร่วม: ผศ. ดร.เศรษฐกาล โปร่งนุช
+- ขอบคุณบริษัทไทยแอดวานซ์เซ็นเตอร์ ที่สนับสนุนแขนกลที่ใช้ในโปรเจกต์
