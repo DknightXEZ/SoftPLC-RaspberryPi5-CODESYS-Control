@@ -1,0 +1,31 @@
+digraph G {
+  graph [rankdir=TB, splines=ortho, forcelabels=true, nodesep=0.5, ranksep=0.38, bgcolor="white", pad=0.3, dpi=200];
+  node  [fontname="Loma", fontsize=15, style=filled, fillcolor="#fff6dc", color="#c98a00", penwidth=1.6, margin="0.18,0.08", shape=box];
+  edge  [fontname="Loma", fontsize=13, color="#333333", penwidth=1.4, arrowsize=0.8];
+  start [label="เริ่มต้น", style="rounded,filled", fillcolor="#ffe08a"];
+  i1 [label="ป้อน Point 1, ความเร็ว\nและจำนวนรอบ (30)\nบนหน้าจอ Visu_Test", shape=polygon, sides=4, skew=0.12, margin="0.12,0.08"];
+  p1 [label="กด REQUEST และ START TEST\nแขนกลเข้าท่า Home"];
+  p2 [label="k = 1"];
+  p3 [label="สั่งเคลื่อนที่ Home → Point 1\nเก็บมุมทุก 0.1 วินาทีจนถึงเป้าหมาย"];
+  p4 [label="คำนวณความคลาดเคลื่อนเทียบเส้นทางอ้างอิง\nหยุดรอ แล้ววัดความคลาดเคลื่อนเมื่อหยุดนิ่ง"];
+  p5 [label="สั่งเคลื่อนที่ Point 1 → Home\nคำนวณความคลาดเคลื่อนแบบเดียวกัน"];
+  d0 [label="กด STOP หรือ\nการสื่อสารขาด?", shape=diamond, fillcolor="#e8f1ff", color="#2f6db5"];
+  ab [label="หยุดแขนกล\nยกเลิกการทดสอบ"];
+  d1 [label="k < 30 ?", shape=diamond, fillcolor="#e8f1ff", color="#2f6db5"];
+  p6 [label="k = k + 1"];
+  p7 [label="คำนวณค่าเฉลี่ย, MAE, ค่าสูงสุด, SD\nและเวลาเคลื่อนที่ของแต่ละแกน"];
+  o1 [label="แสดงตารางผลบน\nหน้าจอ Visu_Test", shape=polygon, sides=4, skew=0.12, margin="0.12,0.08"];
+  stop [label="จบการทดสอบ", style="rounded,filled", fillcolor="#ffe08a"];
+  start -> i1 -> p1 -> p2 -> p3 -> p4 -> p5 -> d0;
+  d0 -> ab [xlabel=" ใช่"];
+  ab -> stop2 [style=invis];
+  stop2 [label="จบการทดสอบ", style="rounded,filled", fillcolor="#ffe08a"];
+  ab -> stop2 [style=solid];
+  d0 -> d1 [xlabel="ไม่ใช่ "];
+  d1 -> p6 [xlabel=" ใช่"];
+  p6 -> p3 [constraint=false];
+  d1 -> p7 [xlabel="ไม่ใช่ "];
+  p7 -> o1 -> stop;
+  {rank=same; d0; ab;}
+  {rank=same; d1; p6;}
+}

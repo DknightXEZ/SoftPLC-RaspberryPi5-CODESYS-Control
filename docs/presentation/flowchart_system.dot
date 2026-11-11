@@ -1,0 +1,34 @@
+digraph G {
+  graph [rankdir=TB, splines=ortho, forcelabels=true, nodesep=0.5, ranksep=0.42, fontname="Loma", bgcolor="white", pad=0.3, dpi=200];
+  node  [fontname="Loma", fontsize=15, style=filled, fillcolor="#fff6dc", color="#c98a00", penwidth=1.6, margin="0.18,0.08"];
+  edge  [fontname="Loma", fontsize=13, color="#333333", penwidth=1.4, arrowsize=0.8];
+  start [label="เริ่มต้น", shape=box, style="rounded,filled", fillcolor="#ffe08a"];
+  p1 [label="เปิดระบบ: Raspberry Pi 5 (CODESYS)\nและ Arduino Mega 2560", shape=box];
+  p2 [label="จัดแขนเข้าท่า Home\nแล้วกำหนด HOME", shape=box];
+  d1 [label="เลือกโหมด\nควบคุม", shape=diamond, fillcolor="#e8f1ff", color="#2f6db5"];
+  i1 [label="CODESYS: กด REQUEST\nป้อนมุมและความเร็ว\nผ่าน Visu_Arm", shape=polygon, sides=4, skew=0.12, margin="0.12,0.08"];
+  i2 [label="Arduino: ป้อนคำสั่ง\nMoveJ / MoveL ผ่าน\nRobot Arm Controller", shape=polygon, sides=4, skew=0.12, margin="0.12,0.08"];
+  p3 [label="ส่งมุมเป้าหมายผ่าน\nModbus RTU", shape=box];
+  p4 [label="ส่งคำสั่งผ่าน\nUSB Serial", shape=box];
+  d2 [label="มุมอยู่ใน\nขอบเขตที่กำหนด?", shape=diamond, fillcolor="#e8f1ff", color="#2f6db5"];
+  p5 [label="ไม่รับคำสั่ง\nแจ้งเตือนผู้ใช้", shape=box];
+  p6 [label="Arduino แปลงมุมเป็นจำนวนพัลส์\nและขับสเต็ปปิ้งมอเตอร์ 6 แกนพร้อมกัน", shape=box];
+  d3 [label="ทุกแกนถึง\nเป้าหมาย?", shape=diamond, fillcolor="#e8f1ff", color="#2f6db5"];
+  o1 [label="แสดงมุมปัจจุบันและตำแหน่ง TCP\nบนหน้าจอ", shape=polygon, sides=4, skew=0.12, margin="0.12,0.08"];
+  d4 [label="สั่งงาน\nต่อหรือไม่?", shape=diamond, fillcolor="#e8f1ff", color="#2f6db5"];
+  stop [label="จบการทำงาน", shape=box, style="rounded,filled", fillcolor="#ffe08a"];
+  start -> p1 -> p2 -> d1;
+  d1 -> i1 [xlabel="CODESYS ", headport=n];
+  d1 -> i2 [xlabel=" Arduino", headport=n];
+  i1 -> p3; i2 -> p4;
+  p3 -> d2; p4 -> d2;
+  d2 -> p6 [xlabel="ใช่ "];
+  d2 -> p5 [xlabel=" ไม่ใช่"];
+  p5 -> d1 [constraint=false];
+  p6 -> d3;
+  d3 -> p6 [xlabel="ไม่ใช่ ", constraint=false];
+  d3 -> o1 [xlabel="ใช่ "];
+  o1 -> d4;
+  d4 -> d1 [xlabel="ใช่", constraint=false];
+  d4 -> stop [xlabel="ไม่ใช่ "];
+}
