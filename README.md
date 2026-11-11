@@ -91,6 +91,11 @@ SoftPLC-RaspberryPi5-CODESYS-Control/
 │   ├── Arduino_Controller_CODESYS.ino   เฟิร์มแวร์หลัก (มอเตอร์, AS5600, EEPROM, USB Serial)
 │   ├── CodesysLink.h                    ค่าคงที่การสื่อสารกับ CODESYS
 │   └── CodesysLink.ino                  Modbus RTU Slave, สิทธิ์ผู้ควบคุม, Watchdog
+├── RobotArmController/            โปรแกรม Robot Arm Controller (Electron) สำหรับโหมด Arduino
+│   ├── index.html                 หน้าจอและลอจิกทั้งหมดของโปรแกรม
+│   ├── main.js                    หน้าต่าง Electron และการเลือกพอร์ต Serial
+│   ├── meshes/                    โมเดล 3 มิติ (STL) ของแขนกล AR2
+│   └── build/icon.ico             ไอคอนที่ใช้ตอน build
 ├── assets/                        ไอคอนโปรแกรม (SVG, PNG, ICO)
 └── docs/images/                   ภาพประกอบ README
 ```
@@ -143,6 +148,22 @@ SoftPLC-RaspberryPi5-CODESYS-Control/
    | อ่าน | 03 Read Holding Registers | 10 | 17 | 20 ms | `GVL_ARM.awRd` |
 4. Login → Download → **Start**
 5. เปิด `http://<IP ของ Raspberry Pi 5>:8080/webvisu.htm`
+
+### 4) โปรแกรม Robot Arm Controller (Windows)
+
+**แบบติดตั้ง** — ดาวน์โหลดไฟล์ `Robot Arm Controller Setup x.x.x.exe` จากหน้า [**Releases**](../../releases) แล้วติดตั้งตามขั้นตอน
+
+**แบบรันจากซอร์สโค้ด** — ต้องมี [Node.js](https://nodejs.org/) (LTS)
+
+```bash
+cd RobotArmController
+npm install        # ติดตั้ง Electron (ครั้งแรกครั้งเดียว)
+npm start          # เปิดโปรแกรม  (หรือดับเบิลคลิก RobotControlAPP.bat)
+npm run build      # สร้างไฟล์ติดตั้ง .exe ไว้ในโฟลเดอร์ dist/
+```
+
+> [!NOTE]
+> โปรแกรมโหลดไลบรารี three.js และ Chart.js จาก CDN จึงต้องต่ออินเทอร์เน็ตตอนเปิดโปรแกรม เพื่อให้ภาพ 3 มิติและกราฟแสดงผล
 
 ---
 

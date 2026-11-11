@@ -1,0 +1,46 @@
+{
+  "name": "robot-controller",
+  "version": "1.0.0",
+  "description": "Robot Arm Controller - 6-DOF robot arm control app (Arduino mode)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win --x64"
+  },
+  "build": {
+    "appId": "com.robot.controller",
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "shortcutName": "Robot Arm Controller"
+    },
+    "files": [
+      "**/*",
+      "!node_modules/*"
+    ],
+    "extraFiles": [
+      {
+        "from": "meshes",
+        "to": "meshes",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "productName": "Robot Arm Controller",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    }
+  },
+  "devDependencies": {
+    "electron": "^30.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}

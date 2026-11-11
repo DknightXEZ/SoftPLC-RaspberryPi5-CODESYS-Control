@@ -1,0 +1,1482 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Robot Arm Controller</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root { --primary: #3498db; --primary-dark: #2980b9; --bg-dark: #1e2836; --bg-sidebar: #2c3e50; --bg-light: #f4f6f9; --panel-bg: #ffffff; --text-main: #333333; --text-muted: #7f8c8d; --border: #e0e6ed; --accent-green: #2ecc71; --accent-red: #e74c3c; --accent-yellow: #f39c12; }
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { margin: 0; padding: 0; display: flex; flex-direction: column; height: 100vh; background-color: var(--bg-light); color: var(--text-main); overflow: hidden; }
+        header { background-color: var(--bg-dark); color: white; height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.2); z-index: 10; }
+        .header-logo { font-size: 16px; font-weight: bold; letter-spacing: 1px; color: #ecf0f1; }
+        .top-tabs { display: flex; gap: 5px; height: 100%; align-items: flex-end; }
+        .tab-btn { padding: 12px 18px; font-size: 12px; font-weight: 600; color: #a0aec0; background: transparent; border: none; border-bottom: 3px solid transparent; cursor: pointer; transition: 0.2s; }
+        .tab-btn:hover { color: white; background: rgba(255,255,255,0.05); }
+        .tab-btn.active { color: white; border-bottom-color: var(--primary); background: rgba(52,152,219,0.15); }
+        .main-container { display: flex; flex: 1; overflow: hidden; }
+        .config-panel { width: 420px; background-color: var(--panel-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; overflow-y: auto; }
+        .panel-content { padding: 15px; display: none; } .panel-content.active { display: block; }
+        .control-group { background: #fafafa; border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+        .control-group h4 { margin: 0 0 10px 0; font-size: 12px; color: var(--bg-dark); text-transform: uppercase; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
+        .slider-row { margin-bottom: 8px; } .slider-row label { display: flex; justify-content: space-between; align-items: center; font-size: 11px; margin-bottom: 3px; font-weight: bold; color: #555; }
+        .jog-group { display: flex; align-items: center; gap: 6px; } .jog-group input[type="range"] { flex: 1; cursor: pointer; accent-color: var(--primary); }
+        .jog-btn { background: #e0e6ed; border: none; border-radius: 4px; width: 24px; height: 24px; display: flex; justify-content: center; align-items: center; cursor: pointer; font-weight: bold; color: var(--bg-dark); font-size: 13px; user-select: none; } .jog-btn:hover { background: var(--primary); color: white; }
+        .jog-btn:disabled { background: #ecf0f1; color: #bdc3c7; cursor: not-allowed; }
+        .angle-input { width: 45px; text-align: center; border: 1px solid #b0b8c1; border-radius: 4px; font-size: 11px; font-weight: bold; color: var(--primary-dark); padding: 4px 2px; outline: none; background: #fff; transition: 0.2s; box-shadow: inset 0 1px 2px rgba(0,0,0,0.1); cursor: text; margin-left: 2px; }
+        .angle-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(52,152,219,0.3); background: #e8f4f8; }
+        .angle-input:disabled { background: #ecf0f1; color: #95a5a6; cursor: not-allowed; }
+        .editor-mode-selector { display: flex; background: #e0e6ed; border-radius: 4px; padding: 2px; margin-bottom: 10px; }
+        .mode-sub-btn { flex: 1; text-align: center; padding: 6px; font-size: 11px; font-weight: bold; border: none; background: transparent; cursor: pointer; border-radius: 3px; } .mode-sub-btn.active { background: white; color: var(--primary); box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .block-workspace { min-height: 200px; max-height: 280px; background: #e9eaec; border: 2px dashed #b0b8c1; border-radius: 6px; padding: 10px; display: flex; flex-direction: column; gap: 6px; overflow-y: auto; }
+        .robot-block { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; color: white; font-size: 11px; font-weight: 600; border-radius: 4px; box-shadow: 0 3px 6px rgba(0,0,0,0.15); cursor: grab; border-left: 6px solid rgba(0,0,0,0.2); }
+        .block-movej { background: #2980b9; } 
+        .block-movel { background: #8e44ad; } 
+        .block-wait { background: #e67e22; } 
+        .block-speed { background: #16a085; } 
+        .block-io { background: #34495e; }
+        .block-loop { background: #f39c12; } 
+        .block-content { display: flex; align-items: center; gap: 5px; flex: 1; } .block-input { background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.2); border-radius: 3px; padding: 2px 4px; font-size: 10px; font-weight: bold; color: #333; text-align: center; width: 35px; outline: none; }
+        .block-select { background: rgba(255,255,255,0.9); border: 1px solid rgba(0,0,0,0.2); border-radius: 3px; padding: 2px; font-size: 10px; font-weight: bold; color: #333; outline: none; }
+        .block-delete-btn { background: rgba(255,255,255,0.2); border: none; color: white; border-radius: 3px; cursor: pointer; padding: 3px 6px; font-size: 10px; font-weight: bold; margin-left: 10px; } .block-delete-btn:hover { background: var(--accent-red); }
+        .code-textarea { width: 100%; height: 250px; font-family: 'Consolas', monospace; font-size: 11px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; resize: none; background: #1e2530; color: #a3eba1; outline: none; line-height: 1.6; }
+        .btn-action { width: 100%; padding: 8px; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: bold; color: white; margin-bottom: 5px; transition: 0.2s; }
+        .btn-primary { background: var(--primary); } .btn-success { background: var(--accent-green); } .btn-dark { background: var(--bg-dark); } .btn-danger { background: var(--accent-red); }
+        .viewer-container { flex: 1; display: flex; flex-direction: column; position: relative; background: var(--panel-bg); border-radius: 4px; }
+        .viewer-header { padding: 10px 20px; background: white; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; z-index: 2; }
+        .viewer-header h2 { margin: 0; font-size: 15px; color: var(--bg-dark); font-weight: 600; }
+        #canvas-container { flex: 1; width: 100%; position: relative; overflow: hidden; background: #f0f2f5; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 18px; color: var(--primary); font-weight: bold; z-index: 10; background: rgba(255,255,255,0.9); padding: 20px 40px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .right-sidebar { width: 80px; background-color: var(--bg-dark); display: flex; flex-direction: column; align-items: center; padding: 20px 0; border-left: 1px solid #1a252f; z-index: 5;}
+        .circle-btn { width: 45px; height: 45px; border-radius: 50%; background: #34495e; color: white; display: flex; justify-content: center; align-items: center; font-size: 14px; font-weight: bold; margin-bottom: 15px; cursor: pointer; border: 2px solid transparent; }
+        .circle-btn:hover { background: var(--primary); border-color: rgba(255,255,255,0.5); } .circle-btn.play { background: var(--accent-green); }
+        footer { height: 30px; background: white; border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; padding: 0 20px; font-size: 11px; color: var(--text-muted); z-index: 10; }
+        .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent-yellow); margin-right: 5px; } .status-dot.connected { background: var(--accent-green); }
+        .tcp-readout { background: #e8f4f8; color: var(--primary-dark); padding: 4px 10px; border-radius: 4px; font-family: monospace; font-weight: bold; font-size: 11px;}
+        .chart-wrapper { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 10px; height: 220px; min-height: 220px; }
+
+        /* 🟢 สไตล์ปุ่มสวิตช์ Toggle Master */
+        .switch { position: relative; display: inline-block; width: 34px; height: 20px; margin-left: 5px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
+        .slider:before { position: absolute; content: ""; height: 14px; width: 14px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: var(--accent-yellow); }
+        input:checked + .slider:before { transform: translateX(14px); }
+
+        /* 🟢 สไตล์ปุ่มสวิตช์ย่อย (Mini Toggle) สำหรับแต่ละแกน */
+        .switch-mini { position: relative; display: inline-block; width: 28px; height: 16px; margin-left: 5px; vertical-align: middle; }
+        .switch-mini input { opacity: 0; width: 0; height: 0; }
+        .slider-mini { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #e0e6ed; border: 1px solid #b0b8c1; transition: .3s; border-radius: 16px; }
+        .slider-mini:before { position: absolute; content: ""; height: 10px; width: 10px; left: 2px; bottom: 2px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+        input:checked + .slider-mini { background-color: var(--accent-yellow); border-color: #d4ac0d; }
+        input:checked + .slider-mini:before { transform: translateX(12px); }
+        .free-label { font-size: 9px; color: var(--text-muted); margin-left: 3px; font-weight: normal; vertical-align: middle; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="header-logo">Robot Arm Controller</div>
+        <div class="top-tabs">
+            <button class="tab-btn active" onclick="switchTab('tab-main')">Main & Hardware</button>
+            <button class="tab-btn" onclick="switchTab('tab-program')">Program Studio</button>
+            <button class="tab-btn" onclick="switchTab('tab-analytics')">📈 Analytics</button>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <aside class="config-panel">
+            <div id="tab-main" class="panel-content active">
+                <div class="control-group" style="border-left: 4px solid var(--accent-green);">
+                    <h4>Hardware Connection</h4>
+                    <div style="display: flex; gap: 5px; margin-bottom: 8px;">
+                        <select id="com-port-select" style="flex: 1; padding: 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px;">
+                            <option value="">-- กด Scan เพื่อค้นหา --</option>
+                        </select>
+                        <button class="btn-dark" onclick="window.robotLink.scanPorts()" style="padding: 6px 10px; font-size: 11px; color: white; border: none; border-radius: 4px; cursor: pointer;">🔍 Scan</button>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn-action btn-success" style="margin:0; flex:1;" onclick="window.robotLink.connect()">🔌 Connect Arduino</button>
+                        <button id="btn-disconnect" class="btn-action btn-danger" style="margin:0; flex:1;" onclick="window.robotLink.disconnect()">⛔ Disconnect</button>
+                    </div>
+                </div>
+
+                <!-- 🔵 [CODESYS] ผู้ควบคุมแขน: หน้านี้ (PC) หรือ CODESYS -->
+                <div class="control-group" style="border-left: 4px solid var(--primary);">
+                    <h4>Control Owner</h4>
+                    <div id="owner-status" style="font-size: 11px; font-weight: bold; color: var(--text-muted); margin-bottom: 4px;">ผู้ควบคุม: ยังไม่ทราบ (ยังไม่ได้เชื่อมต่อ)</div>
+                    <div id="owner-note" style="font-size: 10px; color: var(--text-muted); min-height: 14px; margin-bottom: 6px;"></div>
+                    <div style="display: flex; gap: 5px;">
+                        <button id="owner-take-btn" class="btn-action btn-primary" style="margin:0; flex:1;" onclick="requestArmControl()">🖥️ ขอสิทธิ์ให้หน้านี้</button>
+                        <button id="owner-give-btn" class="btn-action btn-dark" style="margin:0; flex:1;" onclick="giveArmControlToCodesys()">🤖 ส่งสิทธิ์ให้ CODESYS</button>
+                    </div>
+                </div>
+
+                <div class="control-group">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <h4 style="margin:0; border:none; padding:0;">Manual Joint Control</h4>
+                        <div style="font-size: 11px; color: #555;">Step: <input type="text" id="jog-step" value="1" style="width: 42px; text-align: center; border: 1px solid var(--border); border-radius: 3px;"> °</div>
+                    </div>
+
+                    <!-- 🟢 เพิ่ม Mini Toggle แยกสำหรับแต่ละแกน -->
+                    <div class="slider-row">
+                        <label>J1 (Base) 
+                            <span style="display:flex; align-items:center;">
+                                <span id="val1" style="color:var(--primary); font-weight:bold; min-width: 25px; text-align: right;">0°</span>
+                                <label class="switch-mini" title="ปลดล็อคแกน J1 (Freedrive)"><input type="checkbox" id="free-j1" onchange="toggleFreedrive(1, this.checked)"><span class="slider-mini"></span></label><span class="free-label">Free</span>
+                            </span>
+                        </label>
+                        <div class="jog-group"><button class="jog-btn" onmousedown="startJog(1,-1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(1,-1)" ontouchend="stopJog()">-</button><input type="range" id="joint1" min="-75" max="75" value="0" step="1"><button class="jog-btn" onmousedown="startJog(1,1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(1,1)" ontouchend="stopJog()">+</button><input type="text" id="target1" class="angle-input" value="0" title="พิมพ์เป้าหมาย"></div>
+                    </div>
+
+                    <div class="slider-row">
+                        <label>J2 (Shoulder) 
+                            <span style="display:flex; align-items:center;">
+                                <span id="val2" style="color:var(--primary); font-weight:bold; min-width: 25px; text-align: right;">0°</span>
+                                <label class="switch-mini" title="ปลดล็อคแกน J2 (Freedrive)"><input type="checkbox" id="free-j2" onchange="toggleFreedrive(2, this.checked)"><span class="slider-mini"></span></label><span class="free-label">Free</span>
+                            </span>
+                        </label>
+                        <div class="jog-group"><button class="jog-btn" onmousedown="startJog(2,-1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(2,-1)" ontouchend="stopJog()">-</button><input type="range" id="joint2" min="-60" max="60" value="0" step="1"><button class="jog-btn" onmousedown="startJog(2,1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(2,1)" ontouchend="stopJog()">+</button><input type="text" id="target2" class="angle-input" value="0" title="พิมพ์เป้าหมาย"></div>
+                    </div>
+
+                    <div class="slider-row">
+                        <label>J3 (Elbow) 
+                            <span style="display:flex; align-items:center;">
+                                <span id="val3" style="color:var(--primary); font-weight:bold; min-width: 25px; text-align: right;">0°</span>
+                                <label class="switch-mini" title="ปลดล็อคแกน J3 (Freedrive)"><input type="checkbox" id="free-j3" onchange="toggleFreedrive(3, this.checked)"><span class="slider-mini"></span></label><span class="free-label">Free</span>
+                            </span>
+                        </label>
+                        <div class="jog-group"><button class="jog-btn" onmousedown="startJog(3,-1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(3,-1)" ontouchend="stopJog()">-</button><input type="range" id="joint3" min="-60" max="60" value="0" step="1"><button class="jog-btn" onmousedown="startJog(3,1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(3,1)" ontouchend="stopJog()">+</button><input type="text" id="target3" class="angle-input" value="0" title="พิมพ์เป้าหมาย"></div>
+                    </div>
+
+                    <div class="slider-row">
+                        <label>J4 (Wrist 1) 
+                            <span style="display:flex; align-items:center;">
+                                <span id="val4" style="color:var(--primary); font-weight:bold; min-width: 25px; text-align: right;">0°</span>
+                                <label class="switch-mini" title="ปลดล็อคแกน J4 (Freedrive)"><input type="checkbox" id="free-j4" onchange="toggleFreedrive(4, this.checked)"><span class="slider-mini"></span></label><span class="free-label">Free</span>
+                            </span>
+                        </label>
+                        <div class="jog-group"><button class="jog-btn" onmousedown="startJog(4,-1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(4,-1)" ontouchend="stopJog()">-</button><input type="range" id="joint4" min="-180" max="180" value="0" step="1"><button class="jog-btn" onmousedown="startJog(4,1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(4,1)" ontouchend="stopJog()">+</button><input type="text" id="target4" class="angle-input" value="0" title="พิมพ์เป้าหมาย"></div>
+                    </div>
+
+                    <div class="slider-row">
+                        <label>J5 (Wrist 2) 
+                            <span style="display:flex; align-items:center;">
+                                <span id="val5" style="color:var(--primary); font-weight:bold; min-width: 25px; text-align: right;">0°</span>
+                                <label class="switch-mini" title="ปลดล็อคแกน J5 (Freedrive)"><input type="checkbox" id="free-j5" onchange="toggleFreedrive(5, this.checked)"><span class="slider-mini"></span></label><span class="free-label">Free</span>
+                            </span>
+                        </label>
+                        <div class="jog-group"><button class="jog-btn" onmousedown="startJog(5,-1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(5,-1)" ontouchend="stopJog()">-</button><input type="range" id="joint5" min="-180" max="180" value="0" step="1"><button class="jog-btn" onmousedown="startJog(5,1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(5,1)" ontouchend="stopJog()">+</button><input type="text" id="target5" class="angle-input" value="0" title="พิมพ์เป้าหมาย"></div>
+                    </div>
+
+                    <div class="slider-row">
+                        <label>J6 (Tool) 
+                            <span style="display:flex; align-items:center;">
+                                <span id="val6" style="color:var(--primary); font-weight:bold; min-width: 25px; text-align: right;">0°</span>
+                                <label class="switch-mini" title="ปลดล็อคแกน J6 (Freedrive)"><input type="checkbox" id="free-j6" onchange="toggleFreedrive(6, this.checked)"><span class="slider-mini"></span></label><span class="free-label">Free</span>
+                            </span>
+                        </label>
+                        <div class="jog-group">
+                            <button class="jog-btn" onmousedown="startJog(6,-1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(6,-1)" ontouchend="stopJog()">-</button>
+                            <input type="range" id="joint6" min="-180" max="180" value="0" step="1">
+                            <button class="jog-btn" onmousedown="startJog(6,1)" onmouseup="stopJog()" onmouseleave="stopJog()" ontouchstart="startJog(6,1)" ontouchend="stopJog()">+</button>
+                            <input type="text" id="target6" class="angle-input" value="0" title="พิมพ์เป้าหมาย">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 🟢 ส่วน Master Teach Mode (ปลดล็อคพร้อมกันทุกแกน) -->
+                <div class="control-group" style="border-left: 4px solid var(--accent-yellow);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+                        <h4 style="margin:0; border:none; padding:0;">Master Teach Mode</h4>
+                        <div style="display: flex; align-items: center;">
+                            <span style="font-size: 10px; color: #555;">ปลดล็อคทุกแกน</span>
+                            <label class="switch">
+                                <input type="checkbox" id="teach-mode-toggle" onchange="toggleMasterTeachMode(this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div id="teach-status" style="font-size: 10px; color: var(--text-muted); margin-bottom: 8px;">🔴 สถานะ: ควบคุมด้วยโปรแกรม</div>
+                    <button class="btn-action btn-success" onclick="saveWaypoint()" style="margin: 0; background: var(--accent-yellow); color: #333;">📸 บันทึกตำแหน่งปัจจุบัน (Save Waypoint)</button>
+                </div>
+                
+                <div class="control-group">
+                    <h4>Home & Memory Setup</h4>
+                    <button id="btn-go-home" class="btn-action btn-dark" onclick="goHome()">Move to Home</button>
+                    <button id="btn-set-home" class="btn-action btn-primary" onclick="setCurrentAsHome()">Set Current as Home</button>
+                    <button class="btn-action btn-dark" style="background:#8e44ad; margin-top:5px;" onclick="saveToEEPROM()">💾 Save Position to Memory (EEPROM)</button>
+                </div>
+                <script>
+                    function saveToEEPROM() {
+                        if(window.robotLink && window.robotLink.serialWriter) {
+                            window.robotLink.serialWriter.write("SAVE\n").catch(()=>{});
+                            alert("ส่งคำสั่งบันทึกตำแหน่ง (SAVE) ไปยัง Arduino แล้ว");
+                        } else {
+                            alert("กรุณาเชื่อมต่อพอร์ตก่อนครับ");
+                        }
+                    }
+                </script>
+                <label style="font-size: 12px; display: flex; align-items: center; color: var(--text-muted); cursor: pointer; margin-top: 5px;">
+                    <input type="checkbox" id="debug-toggle" style="margin-right: 5px;"> Show Base/TCP Axes (Debug)
+                </label>
+            </div>
+
+            <div id="tab-program" class="panel-content">
+                <div class="control-group">
+                    <h4>Program Editor</h4>
+                    <div class="editor-mode-selector">
+                        <button id="btn-mode-block" class="mode-sub-btn active" onclick="switchEditorMode('block')">🧩 Visual Blocks</button>
+                        <button id="btn-mode-code" class="mode-sub-btn" onclick="switchEditorMode('code')">📝 Text Script</button>
+                    </div>
+                </div>
+                <div id="area-block-workspace">
+                    <div class="control-group" style="padding:8px; margin-bottom:8px;">
+                        <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+                            <button class="btn-action btn-primary" style="flex: 1 1 20%; margin:0; font-size:10px; padding:5px;" onclick="addVisualBlock('MoveJ')">+ MoveJ</button>
+                            <button class="btn-action" style="flex: 1 1 20%; margin:0; font-size:10px; padding:5px; background:#8e44ad;" onclick="addVisualBlock('MoveL')">+ MoveL</button>
+                            <button class="btn-action btn-dark" style="flex: 1 1 20%; margin:0; font-size:10px; padding:5px; background:#7f8c8d;" onclick="addVisualBlock('Home')">+ Home</button>
+                            <button class="btn-action btn-dark" style="flex: 1 1 20%; margin:0; font-size:10px; padding:5px; background:#16a085;" onclick="addVisualBlock('Speed')">+ Speed</button>
+                            <button class="btn-action btn-dark" style="flex: 1 1 20%; margin:0; font-size:10px; padding:5px; background:#e67e22;" onclick="addVisualBlock('Wait')">+ Wait</button>
+                            <button class="btn-action btn-dark" style="flex: 1 1 20%; margin:0; font-size:10px; padding:5px; background:#34495e;" onclick="addVisualBlock('SetIO')">+ Set I/O</button>
+                            <button class="btn-action btn-dark" style="flex: 1 1 20%; margin:0; font-size:10px; padding:5px; background:#f39c12;" onclick="addVisualBlock('Loop')">+ Loop</button>
+                        </div>
+                    </div>
+                    <div class="control-group">
+                        <div id="block-container" class="block-workspace" ondragover="dragOver(event)" ondrop="dropBlock(event)"></div>
+                    </div>
+                </div>
+                
+                <div id="area-code-workspace" style="display: none;">
+                    <div class="control-group"><textarea id="code-text-area" class="code-textarea" placeholder="// สคริปต์ข้อความ..."></textarea></div>
+                    <button class="btn-action btn-dark" onclick="compileCodeToBlocks()" style="margin-bottom: 10px;">🔄 Sync to Blocks</button>
+                </div>
+                
+                <div class="control-group">
+                    <button id="main-play-btn" class="btn-action btn-success" onclick="toggleProgram()">▶️ Run Full Program</button>
+                    <div style="display: flex; gap: 5px; margin-bottom: 5px;">
+                        <button class="btn-action btn-primary" onclick="exportProgramFile()" style="margin:0; flex:1;">💾 Save File</button>
+                        <button class="btn-action btn-dark" onclick="document.getElementById('import-file').click()" style="margin:0; flex:1;">📂 Load File</button>
+                        <input type="file" id="import-file" style="display:none;" accept=".json" onchange="importProgramFile(event)">
+                    </div>
+                    <button class="btn-action btn-danger" onclick="clearProgramWorkspace()" style="margin-bottom:0;">🗑️ Clear Program</button>
+                </div>
+            </div>
+
+            <div id="tab-analytics" class="panel-content">
+                <div class="control-group" style="padding-bottom: 5px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                        <h4 style="margin: 0; border: none; padding: 0;">Joint Telemetry (Input vs Actual)</h4>
+                        <label style="font-size: 11px; cursor: pointer; color: #555;">
+                            <input type="checkbox" id="auto-record-chk" checked> Auto-REC on Play
+                        </label>
+                    </div>
+
+                    <div style="height: calc(100vh - 200px); overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding-right: 5px;">
+                        <div class="chart-wrapper"><canvas id="chartJ1"></canvas></div>
+                        <div class="chart-wrapper"><canvas id="chartJ2"></canvas></div>
+                        <div class="chart-wrapper"><canvas id="chartJ3"></canvas></div>
+                        <div class="chart-wrapper"><canvas id="chartJ4"></canvas></div>
+                        <div class="chart-wrapper"><canvas id="chartJ5"></canvas></div>
+                        <div class="chart-wrapper"><canvas id="chartJ6"></canvas></div>
+                    </div>
+                </div>
+
+                <div class="control-group" style="position: sticky; bottom: 0; background: var(--panel-bg); z-index: 10;">
+                    <div style="display: flex; gap: 5px;">
+                        <button class="btn-action btn-primary" onclick="startTelemetry()" style="margin: 0; flex: 1;">🔴 REC Manual</button>
+                        <button class="btn-action btn-dark" onclick="stopTelemetry()" style="margin: 0; flex: 1;">⏹️ STOP</button>
+                    </div>
+                    <div style="display: flex; gap: 5px; margin-top: 5px;">
+                        <button class="btn-action btn-danger" style="margin: 0; flex: 1;" onclick="clearTelemetry()">🗑️ Clear</button>
+                        <button class="btn-action btn-success" onclick="exportInteractiveHTML()" style="margin: 0; flex: 1.5; background: #27ae60;">🌐 Save Interactive</button>
+                        <button class="btn-action btn-success" onclick="exportCSV()" style="margin: 0; flex: 1.5; background: #27ae60;">📊 Export CSV</button>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="viewer-container">
+            <div class="viewer-header">
+                <h2>Robot Workspace</h2>
+                <div class="tcp-readout" id="tcp-display">TCP X: 0 | Y: 0 | Z: 0</div>
+            </div>
+
+            <div id="canvas-container">
+                <div id="loading">Loading 3D Engine... 0%</div>
+            </div>
+        </main>
+
+        <aside class="right-sidebar">
+            <div style="color: #bdc3c7; font-size: 10px; margin-bottom: 20px; text-align: center;">Waypoints</div>
+            <div class="circle-btn" onclick="saveWaypoint()">+</div>
+            <div class="circle-btn" onclick="clearProgramWorkspace()">X</div>
+            <div style="flex: 1;"></div> 
+            <div id="side-play-btn" class="circle-btn play" onclick="toggleProgram()">Play</div>
+        </aside>
+    </div>
+
+    <footer>
+        <div>
+            <span class="status-dot" id="ros-dot"></span> 
+            <span id="ros-status">WAITING FOR ARDUINO...</span>
+            <span id="speed-display" style="margin-left: 15px; color: var(--accent-green); font-weight: bold;">⚡ Speed: 50%</span>
+            <span id="loop-display" style="margin-left: 15px; color: var(--accent-yellow); font-weight: bold; letter-spacing: 0.5px;"></span>
+        </div>
+        <div><span><span id="clock">00:00:00</span></span></div>
+    </footer>
+
+    <script>
+        const MOTOR_STEP_ANGLE = 1.8; 
+        const STEPS_PER_DEGREE = [
+            (4 * 40.0) / MOTOR_STEP_ANGLE,      
+            (4 * 50.0) / MOTOR_STEP_ANGLE,      
+            (4 * 50.0) / MOTOR_STEP_ANGLE,      
+            (4 * 44.8) / MOTOR_STEP_ANGLE,      
+            (8 * 9.837112) / MOTOR_STEP_ANGLE,  
+            (4 * 20.0) / MOTOR_STEP_ANGLE       
+        ];
+
+        let jointTargets = [0, 0, 0, 0, 0, 0]; 
+        let uiGraphTargets = [0, 0, 0, 0, 0, 0]; 
+        let freedriveModes = [false, false, false, false, false, false]; // 🟢 เก็บสถานะ Free แยกแกน
+
+        // 🔵 [CODESYS] ผู้ควบคุมแขน: false = หน้านี้ (PC), true = CODESYS
+        // Arduino ส่งบรรทัด OWNER:PC หรือ OWNER:CDS มาบอกทุกครั้งที่เปลี่ยน (ตามด้วย BUSY / BLOCKED / WD ถ้ามีเหตุผล)
+        let cdsOwnsArm = false;
+
+        // ล็อคหรือปลดล็อคปุ่มที่สั่งให้แขนขยับ  ขณะ CODESYS คุมอยู่หน้านี้ดูได้อย่างเดียว
+        window.setArmOwnerLock = function(locked) {
+            for (let j = 1; j <= 6; j++) {
+                let off = locked || freedriveModes[j - 1];
+                let slider = document.getElementById('joint' + j);
+                slider.disabled = off;
+                document.getElementById('target' + j).disabled = off;
+                slider.parentElement.querySelectorAll('.jog-btn').forEach(b => b.disabled = off);
+                document.getElementById('free-j' + j).disabled = locked || isProgramRunning;
+            }
+            document.getElementById('teach-mode-toggle').disabled = locked || isProgramRunning;
+            ['main-play-btn', 'btn-go-home', 'btn-set-home'].forEach(id => { let b = document.getElementById(id); if (b) b.disabled = locked; });
+        };
+
+        window.handleOwnerLine = function(text) {
+            let parts = text.trim().split(/\s+/); let who = parts[0]; let why = parts[1] || '';
+            if (who !== 'CDS' && who !== 'PC') return;
+            let wasCds = cdsOwnsArm;
+            cdsOwnsArm = (who === 'CDS');
+            if (cdsOwnsArm && !wasCds && isProgramRunning) window.toggleProgram();   // หยุดโปรแกรมของหน้านี้ที่กำลังรันอยู่
+
+            let st = document.getElementById('owner-status');
+            st.innerText = cdsOwnsArm ? '🤖 ผู้ควบคุม: CODESYS (หน้านี้ดูได้อย่างเดียว)' : '🖥️ ผู้ควบคุม: หน้านี้ (PC)';
+            st.style.color = cdsOwnsArm ? 'var(--accent-red)' : 'var(--accent-green)';
+            const notes = {
+                BUSY: 'แขนยังเคลื่อนที่อยู่ จึงยังสลับสิทธิ์ไม่ได้ รอให้หยุดก่อนแล้วกดใหม่',
+                BLOCKED: 'CODESYS คุมอยู่ คำสั่งจากหน้านี้ไม่ถูกรับ',
+                WD: 'CODESYS ไม่ตอบเกิน 1 วินาที Arduino จึงหยุดแขนและคืนสิทธิ์ให้หน้านี้'
+            };
+            document.getElementById('owner-note').innerText = notes[why] || '';
+            window.setArmOwnerLock(cdsOwnsArm);
+        };
+
+        window.requestArmControl = function() {
+            if(!window.robotLink || !window.robotLink.serialWriter) return alert("⚠️ กรุณาเชื่อมต่อ Arduino ก่อนครับ");
+            window.robotLink.serialWriter.write("REQ\n").catch(()=>{});
+        };
+
+        window.giveArmControlToCodesys = function() {
+            if(!window.robotLink || !window.robotLink.serialWriter) return alert("⚠️ กรุณาเชื่อมต่อ Arduino ก่อนครับ");
+            if(isProgramRunning) return alert("⚠️ กรุณาหยุดโปรแกรมของหน้านี้ก่อนส่งสิทธิ์ครับ");
+            window.robotLink.serialWriter.write("REL\n").catch(()=>{});
+        };
+
+        let commandsData = [];
+        let isProgramRunning = false;
+        let globalSpeed = 50;
+        let draggedIndex = null;
+        let homeA = [0, 0, 0, 0, 0, 0];
+        const visualOffsets = [0, 0, 0, 0, 0, 0]; 
+
+        window.activeLoopCount = 1;
+        window.telemetryLogs = []; 
+        window.graphLoopData = []; // 🟢 เพิ่มการเก็บค่าป้องกันล้น
+
+        // 🟢 [REC เสถียร] แขนจริงหมุนช้ากว่าความเร็วที่คำนวณจากค่า Speed ประมาณ 6%
+        //    (วัดจากการทดสอบ 30 รอบ: J2 จริง 10.53°/s เทียบกับที่คำนวณได้ 11.18°/s ที่ Speed 40)
+        //    จึงยืดเวลาของเส้น Target ด้วยค่านี้ ให้เส้น Target กับเส้น Actual เดินไปพร้อมกัน (ตั้ง 1.0 = ใช้ค่าคำนวณตรง ๆ)
+        const HW_TIME_SCALE = 1.06;
+
+        document.addEventListener('input', function(e) {
+            if (e.target.tagName.toLowerCase() === 'input' && e.target.type === 'text') {
+                if (e.target.classList.contains('angle-input') || e.target.classList.contains('block-input') || e.target.id === 'jog-step') {
+                    const thMap = {
+                        'ๅ':'1', '/':'2', '-':'3', 'ภ':'4', 'ถ':'5', 
+                        'ุ':'6', 'ึ':'7', 'ค':'8', 'ต':'9', 'จ':'0', 
+                        'ข':'-', 'ช':'+', 'ม':',', 'ใ':'.'
+                    };
+                    let val = e.target.value; let newVal = '';
+                    for(let i=0; i<val.length; i++) { newVal += thMap[val[i]] || val[i]; }
+                    let cleanVal = newVal.replace(/[^0-9\-\,\.\ \+]/g, '');
+                    if (val !== cleanVal) {
+                        let cursor = e.target.selectionStart;
+                        if (cleanVal.length < val.length) cursor--; 
+                        e.target.value = cleanVal;
+                        try { e.target.setSelectionRange(cursor, cursor); } catch(err){}
+                    }
+                }
+            }
+        });
+
+        // 🟢 ฟังก์ชันสำหรับเปิด/ปิด Freedrive แยกทีละแกน
+        window.toggleFreedrive = function(jointIndex, isFree, skipBulkCommand = false) {
+            if(!window.robotLink || !window.robotLink.serialWriter) {
+                document.getElementById('free-j' + jointIndex).checked = !isFree;
+                return alert("⚠️ กรุณาเชื่อมต่อ Arduino ก่อนเปิดใช้งาน Teach Mode ครับ");
+            }
+            
+            freedriveModes[jointIndex - 1] = isFree;
+            
+            let slider = document.getElementById(`joint${jointIndex}`);
+            let targetInp = document.getElementById(`target${jointIndex}`);
+            let jogBtns = slider.parentElement.querySelectorAll('.jog-btn');
+
+            if(isFree) {
+                if(!skipBulkCommand) window.robotLink.serialWriter.write(`FREE${jointIndex}\n`).catch(()=>{});
+                
+                slider.disabled = true;
+                targetInp.disabled = true;
+                jogBtns.forEach(btn => btn.disabled = true);
+            } else {
+                if(!skipBulkCommand) window.robotLink.serialWriter.write(`LOCK${jointIndex}\n`).catch(()=>{});
+                
+                slider.disabled = false;
+                targetInp.disabled = false;
+                jogBtns.forEach(btn => btn.disabled = false);
+                
+                let actualDeg = window.robot ? (window.robot.joints[jointIndex - 1].rotation.z * 180 / Math.PI) - visualOffsets[jointIndex - 1] : jointTargets[jointIndex - 1];
+                jointTargets[jointIndex - 1] = Math.round(actualDeg);
+                uiGraphTargets[jointIndex - 1] = Math.round(actualDeg);
+                slider.value = Math.round(actualDeg);
+                targetInp.value = Math.round(actualDeg);
+                
+                if(!skipBulkCommand) window.robotLink.sendJointsData(); 
+            }
+            
+            let anyFree = freedriveModes.includes(true);
+            document.getElementById('teach-status').innerText = anyFree ? "🟢 สถานะ: มีแกนถูกปลดล็อค (Freedrive)" : "🔴 สถานะ: ควบคุมด้วยโปรแกรม";
+            document.getElementById('teach-status').style.color = anyFree ? "var(--accent-green)" : "var(--text-muted)";
+        }
+
+        // 🟢 ฟังก์ชัน Master สำหรับปลดล็อค/ล็อค ทุกแกนพร้อมกัน
+        window.toggleMasterTeachMode = function(isFree) {
+            if(!window.robotLink || !window.robotLink.serialWriter) {
+                document.getElementById('teach-mode-toggle').checked = !isFree;
+                return alert("⚠️ กรุณาเชื่อมต่อ Arduino ก่อนเปิดใช้งาน Teach Mode ครับ");
+            }
+
+            for(let i=1; i<=6; i++) {
+                let cb = document.getElementById(`free-j${i}`);
+                if(cb && cb.checked !== isFree) {
+                    cb.checked = isFree;
+                    window.toggleFreedrive(i, isFree, true); 
+                }
+            }
+
+            if(isFree) {
+                window.robotLink.serialWriter.write("FREE_ALL\n").catch(()=>{});
+                document.getElementById('teach-status').innerText = "🟢 ปลดล็อคทั้งหมด: ใช้มือจับแขนกลขยับได้เลย";
+                document.getElementById('teach-status').style.color = "var(--accent-green)";
+            } else {
+                window.robotLink.serialWriter.write("LOCK_ALL\n").catch(()=>{});
+                window.robotLink.sendJointsData(); 
+                document.getElementById('teach-status').innerText = "🔴 สถานะ: ล็อคมอเตอร์ (ควบคุมด้วยโปรแกรม)";
+                document.getElementById('teach-status').style.color = "var(--text-muted)";
+            }
+        }
+
+        window.exportProgramFile = function() {
+            if(commandsData.length === 0) return alert("ไม่มีคำสั่งให้บันทึกครับ");
+            let dataStr = JSON.stringify(commandsData, null, 2);
+            let blob = new Blob([dataStr], { type: "application/json" });
+            let url = URL.createObjectURL(blob);
+            let link = document.createElement("a");
+            link.href = url; link.download = "robot_program_" + new Date().getTime() + ".json";
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        };
+
+        window.importProgramFile = function(event) {
+            let file = event.target.files[0];
+            if(!file) return;
+            let reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    let parsed = JSON.parse(e.target.result);
+                    if(Array.isArray(parsed)) { commandsData = parsed; renderBlocks(); alert("📂 โหลดโปรแกรมสำเร็จ!"); } 
+                    else { alert("❌ รูปแบบไฟล์ไม่ถูกต้อง"); }
+                } catch(err) { alert("❌ เกิดข้อผิดพลาดในการอ่านไฟล์"); }
+                event.target.value = ""; 
+            };
+            reader.readAsText(file);
+        };
+
+        let telemetryCharts = [];
+        let tDatas = [];
+        const chartColors = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6'];
+
+        // 🟢 [REC เสถียร] ระหว่างบันทึก วาดกราฟสดเฉพาะช่วงล่าสุดและไม่ถี่เกินไป
+        //    เดิมวาดกราฟทั้ง 6 กราฟใหม่ทั้งหมดทุก 0.1 วินาที ยิ่งบันทึกนานยิ่งหนัก จนเครื่องหน่วงและจังหวะโปรแกรมเพี้ยน
+        //    ข้อมูลทุกจุดยังเก็บไว้ครบใน telemetryLogs สำหรับ Export CSV / Save Interactive เหมือนเดิม
+        const LIVE_WINDOW_POINTS = 300;   // กราฟสดแสดง 30 วินาทีล่าสุด (บันทึกทุก 0.1 วินาที)
+        const LIVE_REDRAW_MS = 500;       // วาดกราฟสดใหม่ทุก 0.5 วินาที
+        let lastLiveRedraw = 0;
+        window.liveOffset = 0;            // แถวแรกของ telemetryLogs ที่กราฟสดกำลังแสดง (ใช้กับ tooltip)
+
+        function makeJointDatasets(i, actData, tgtData) {
+            return [
+                // 🟢 เปลี่ยน fill: true เป็น fill: false เพื่อเอาสีใต้ออก และปรับสีให้เหลือแค่เส้น
+                { label: 'J'+(i+1) + ' Actual (จริง)', data: actData, borderColor: chartColors[i], backgroundColor: chartColors[i], borderWidth: 2, pointRadius: 0, tension: 0.1, fill: false },
+                { label: 'J'+(i+1) + ' Target (คำสั่ง)', data: tgtData, borderColor: '#2c3e50', borderDash: [5, 5], borderWidth: 1.5, pointRadius: 0, tension: 0, fill: false }
+            ];
+        }
+
+        // สร้างข้อมูลกราฟของทั้ง 6 แกนจากแถวที่บันทึกไว้ (ใช้ทั้งกราฟสดและไฟล์ Save Interactive)
+        function buildChartData(rows) {
+            let labels = rows.map(r => r.label);
+            let out = [];
+            for (let i = 0; i < 6; i++) {
+                out.push({ labels: labels, datasets: makeJointDatasets(i, rows.map(r => Number(r.joints[i].actDeg)), rows.map(r => Number(r.joints[i].tgtDeg))) });
+            }
+            return out;
+        }
+
+        function analyticsVisible() {
+            let p = document.getElementById('tab-analytics');
+            return !!(p && p.classList.contains('active'));
+        }
+
+        // วาดกราฟสด: ปกติวาดเฉพาะเมื่อหน้า Analytics เปิดอยู่ ไม่เกินทุก 0.5 วินาที และเฉพาะ 30 วินาทีล่าสุด
+        // force = วาดทันที, full = วาดข้อมูลทั้งหมด (ใช้หลังหยุดบันทึก)
+        window.redrawLiveCharts = function(force, full) {
+            if (!telemetryCharts.length) return;
+            let now = performance.now();
+            if (!force && (now - lastLiveRedraw < LIVE_REDRAW_MS || !analyticsVisible())) return;
+            lastLiveRedraw = now;
+            let logs = window.telemetryLogs || [];
+            let start = full ? 0 : Math.max(0, logs.length - LIVE_WINDOW_POINTS);
+            window.liveOffset = start;
+            let rows = logs.slice(start);
+            let labels = rows.map(r => r.label);
+            for (let i = 0; i < 6; i++) {
+                tDatas[i].labels = labels;
+                tDatas[i].datasets[0].data = rows.map(r => Number(r.joints[i].actDeg));
+                tDatas[i].datasets[1].data = rows.map(r => Number(r.joints[i].tgtDeg));
+                if (telemetryCharts[i]) telemetryCharts[i].update('none');
+            }
+        };
+
+        setTimeout(() => {
+            for(let i=0; i<6; i++) {
+                tDatas.push({ labels: [], datasets: makeJointDatasets(i, [], []) });
+                let ctx = document.getElementById('chartJ'+(i+1)).getContext('2d');
+                telemetryCharts.push(new Chart(ctx, {
+                    type: 'line', data: tDatas[i],
+                    options: {
+                        responsive: true, maintainAspectRatio: false, animation: false,
+                        layout: { padding: { left: 5, right: 15, top: 10, bottom: 5 } },
+                        interaction: { mode: 'index', intersect: false },
+                        scales: {
+                            x: { ticks: { maxTicksLimit: 10, font: {size: 11} }, title: { display: true, text: 'เวลา (s) และ การวนลูป', font: { size: 10, style: 'italic' } } },
+                            y: { ticks: { font: {size: 11, weight: 'bold'} }, title: { display: true, text: 'องศา (°)', font: { size: 11 } } }
+                        },
+                        plugins: { 
+                            legend: { position: 'top', align: 'end', labels: { boxWidth: 12, font: { size: 11, weight: 'bold' } } },
+                            tooltip: { backgroundColor: 'rgba(0,0,0,0.85)', titleFont: { size: 13 }, bodyFont: { size: 13 },
+                                callbacks: {
+                                    afterLabel: function(context) {
+                                        let dataIdx = context.dataIndex; let dsIdx = context.datasetIndex; let log = window.telemetryLogs[(window.liveOffset || 0) + dataIdx];
+                                        if(!log) return ''; let jointLog = log.joints[i];
+                                        return dsIdx === 0 ? `▶ Steps (จริง): ${jointLog.actStep} stp\n▶ ความเร็ว: ${jointLog.speed} °/s` : `▶ Steps (คำสั่ง): ${jointLog.tgtStep} stp`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }));
+            }
+        }, 500);
+
+        let recordStartTime = 0; let telemetryInterval = null;
+        let lastTimeForSpeed = null;
+        let lastDegForSpeed = [0,0,0,0,0,0];
+
+        window.startTelemetry = function() {
+            if(telemetryInterval) clearInterval(telemetryInterval);
+            recordStartTime = performance.now();
+            window.telemetryLogs = []; 
+            window.graphLoopData = []; // 🟢 กันปัญหา Memory data ล้นจากการคลิกหลายครั้ง
+            lastTimeForSpeed = performance.now();
+            for(let i=0; i<6; i++) {
+                uiGraphTargets[i] = jointTargets[i];
+                lastDegForSpeed[i] = window.robot ? (window.robot.joints[i].rotation.z * 180 / Math.PI) - visualOffsets[i] : jointTargets[i];
+            }
+            window.redrawLiveCharts(true, false);
+
+            telemetryInterval = setInterval(() => {
+                let now = performance.now();
+                let t = (now - recordStartTime) / 1000;
+                let dt = (now - lastTimeForSpeed) / 1000;
+                if(dt === 0) dt = 0.001; 
+
+                let tLabel = t.toFixed(1) + "s" + (isProgramRunning ? ` (รอบ ${window.activeLoopCount})` : "");
+                window.graphLoopData.push(isProgramRunning ? window.activeLoopCount : 0);
+
+                let currentLogRow = { time: t.toFixed(1), label: tLabel, loop: isProgramRunning ? window.activeLoopCount : 0, joints: [] };
+
+                for(let i=0; i<6; i++) {
+                    let actualDeg = window.robot ? (window.robot.joints[i].rotation.z * 180 / Math.PI) - visualOffsets[i] : jointTargets[i];
+                    let targetDeg = uiGraphTargets[i];
+                    let actualStep = Math.round(actualDeg * STEPS_PER_DEGREE[i]);
+                    let targetStep = Math.round(targetDeg * STEPS_PER_DEGREE[i]);
+                    let speedDegS = (actualDeg - lastDegForSpeed[i]) / dt;
+
+                    currentLogRow.joints.push({ actDeg: actualDeg.toFixed(2), tgtDeg: targetDeg.toFixed(2), actStep: actualStep, tgtStep: targetStep, speed: speedDegS.toFixed(2) });
+                    lastDegForSpeed[i] = actualDeg;
+                }
+                window.telemetryLogs.push(currentLogRow);
+                lastTimeForSpeed = now;
+                window.redrawLiveCharts(false, false);   // 🟢 [REC เสถียร] วาดเฉพาะเมื่อถึงเวลาและหน้า Analytics เปิดอยู่
+            }, 100);
+        }
+
+        // หยุดบันทึกแล้ววาดกราฟข้อมูลทั้งหมดครั้งเดียว ให้ดูผลทั้งรอบได้
+        window.stopTelemetry = function() { if(telemetryInterval) clearInterval(telemetryInterval); telemetryInterval = null; window.redrawLiveCharts(true, true); }
+
+        window.clearTelemetry = function() {
+            window.telemetryLogs = [];
+            window.graphLoopData = []; // 🟢 กันปัญหา Memory
+            window.redrawLiveCharts(true, true);
+        }
+
+        window.exportInteractiveHTML = function() {
+            if (!window.telemetryLogs || window.telemetryLogs.length === 0) return alert("ไม่มีข้อมูลกราฟให้บันทึกครับ");
+
+            let htmlContent = `
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Robot Telemetry Interactive Chart</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"><\/script>
+    <style>
+        * { box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f6f9; padding: 10px; margin: 0; color: #333; }
+        h2 { text-align: center; color: #2c3e50; font-size: 20px; margin-top: 10px; }
+        p.desc { text-align:center; color:#7f8c8d; font-size:12px; margin-bottom: 20px; padding: 0 10px; }
+        #charts-wrapper { display: flex; flex-direction: column; gap: 15px; }
+        .chart-container { background: white; border-radius: 8px; padding: 10px; width: 100%; height: 35vh; min-height: 250px; max-height: 400px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); position: relative; }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #bdc3c7; border-radius: 10px; }
+    </style>
+</head>
+<body>
+    <h2>📊 ข้อมูลกราฟวิเคราะห์หุ่นยนต์</h2>
+    <p class="desc">แตะหรือนำเมาส์ไปชี้ที่เส้นกราฟเพื่อดูค่า Actual (องศาจริง) และ Target (คำสั่ง) อย่างละเอียด</p>
+    <div id="charts-wrapper"></div>
+    <script>
+        const chartDataArray = ${JSON.stringify(buildChartData(window.telemetryLogs))}; const rawLogs = ${JSON.stringify(window.telemetryLogs)}; const container = document.getElementById('charts-wrapper');
+        chartDataArray.forEach((data, index) => {
+            let wrapper = document.createElement('div'); wrapper.className = 'chart-container';
+            let canvas = document.createElement('canvas'); wrapper.appendChild(canvas); container.appendChild(wrapper);
+            new Chart(canvas.getContext('2d'), {
+                type: 'line', data: data,
+                options: {
+                    responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, 
+                    scales: { x: { ticks: { maxTicksLimit: 8, font: {size: 10} }, title: { display: false } }, y: { title: { display: true, text: 'พิกัดองศา (°)', font: {weight: 'bold', size: 11} } } },
+                    plugins: { 
+                        legend: { position: 'top', labels: { font: {size: 12, weight:'bold'}, boxWidth: 12 } },
+                        tooltip: { backgroundColor: 'rgba(0,0,0,0.8)', titleFont: {size: 13}, bodyFont: {size: 13}, padding: 10,
+                            callbacks: {
+                                afterLabel: function(context) {
+                                    let log = rawLogs[context.dataIndex]; if(!log) return ''; let jointLog = log.joints[index];
+                                    return context.datasetIndex === 0 ? '▶ Steps (จริง): ' + jointLog.actStep + ' stp\\n▶ ความเร็ว: ' + jointLog.speed + ' °/s' : '▶ Steps (คำสั่ง): ' + jointLog.tgtStep + ' stp';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        });
+    <\/script>
+</body>
+</html>`;
+            let blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8;' });
+            let link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "robot_interactive_graph_" + new Date().getTime() + ".html";
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        };
+
+        window.exportCSV = function() {
+            if (!window.telemetryLogs || window.telemetryLogs.length === 0) return alert("ไม่มีข้อมูลกราฟให้บันทึกครับ");
+            let csvContent = "\uFEFFTime(s),Loop,";
+            for(let j=1; j<=6; j++) csvContent += `J${j}_Act_Deg,J${j}_Tgt_Deg,J${j}_Act_Step,J${j}_Tgt_Step,J${j}_Speed_DegPerSec,`;
+            csvContent += "\n";
+            window.telemetryLogs.forEach(log => {
+                let row = [log.time, log.loop];
+                for (let j = 0; j < 6; j++) { row.push(log.joints[j].actDeg, log.joints[j].tgtDeg, log.joints[j].actStep, log.joints[j].tgtStep, log.joints[j].speed); }
+                csvContent += row.join(",") + "\n";
+            });
+            let blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            let link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "robot_accuracy_data_advanced_" + new Date().getTime() + ".csv";
+            document.body.appendChild(link); link.click(); document.body.removeChild(link);
+        };
+
+        window.toggleProgram = function() {
+            if (isProgramRunning) {
+                isProgramRunning = false;
+                if(window.robotLink && window.robotLink.serialWriter) window.robotLink.serialWriter.write("STOP\n").catch(()=>{});
+                stopTelemetry(); 
+                document.getElementById('loop-display').innerText = ""; 
+                window.activeLoopCount = 1; 
+
+                // ปลดล็อคปุ่ม Teach Mode เมื่อโปรแกรมหยุด
+                document.getElementById('teach-mode-toggle').disabled = false;
+                document.querySelectorAll('input[type="checkbox"][id^="free-j"]').forEach(t => t.disabled = false);
+                window.setArmOwnerLock(cdsOwnsArm);   // 🔵 [CODESYS]
+            } else { 
+                if (cdsOwnsArm) return alert("⚠️ CODESYS เป็นผู้ควบคุมอยู่ กรุณากด 'ขอสิทธิ์ให้หน้านี้' ก่อนครับ");   // 🔵 [CODESYS]
+                // 🟢 ระบบ Auto-Lock: บังคับล็อคทุกแกนให้แน่นสนิทก่อนรันโปรแกรม
+                window.toggleMasterTeachMode(false);
+                document.getElementById('teach-mode-toggle').checked = false;
+
+                // ปิดการกดปุ่ม Teach Mode ชั่วคราวระหว่างโปรแกรมรัน
+                document.getElementById('teach-mode-toggle').disabled = true;
+                document.querySelectorAll('input[type="checkbox"][id^="free-j"]').forEach(t => t.disabled = true);
+
+                runCompiledProgram(); 
+            }
+        }
+
+        class RobotConnection {
+            constructor() {
+                this.serialPort = null; this.serialWriter = null; this.isScanning = false;
+                this.serialReader = null; this.readableClosed = null; this.writableClosed = null; this.isClosing = false;   // 🔌 ใช้ตอน Disconnect
+                this.ipcRenderer = null;
+                try {
+                    const electron = require('electron'); this.ipcRenderer = electron.ipcRenderer;
+                    this.ipcRenderer.on('update-port-list', (event, ports) => {
+                        const select = document.getElementById('com-port-select'); select.innerHTML = '';
+                        if (!ports || ports.length === 0) { select.innerHTML = '<option value="">-- ไม่พบอุปกรณ์ USB --</option>'; return; }
+                        ports.forEach(port => { const opt = document.createElement('option'); opt.value = port.portId; opt.text = port.displayName || port.portName || "USB Serial Device"; select.appendChild(opt); });
+                        document.getElementById('ros-status').innerText = 'PORT FOUND. WAITING CONNECT...';
+                    });
+                } catch (error) { console.log("Running in Web Mode (No Electron). Using standard Web Serial API."); }
+            }
+
+            async scanPorts() {
+                if (!navigator.serial) return alert("❌ เบราว์เซอร์ของคุณไม่รองรับ Web Serial API (แนะนำให้ใช้ Google Chrome หรือ Edge บนคอมพิวเตอร์)");
+                if (this.ipcRenderer && this.isScanning) { this.ipcRenderer.send('cancel-port-request'); }
+
+                if (this.serialPort) { await this.closePort(); this.resetUi('WAITING...'); }   // 🔌 กด Scan ขณะต่ออยู่: ปิดพอร์ตเดิมก่อน
+                this.isScanning = true; document.getElementById('ros-status').innerText = 'SCANNING...';
+                try {
+                    this.serialPort = await navigator.serial.requestPort(); 
+                    await this.serialPort.open({ baudRate: 115200 }); 
+                    const textEncoder = new TextEncoderStream(); this.writableClosed = textEncoder.readable.pipeTo(this.serialPort.writable);
+                    this.serialWriter = textEncoder.writable.getWriter();
+                    document.getElementById('ros-status').innerText = 'CONNECTED'; document.getElementById('ros-dot').classList.add('connected');
+                    alert("✅ เชื่อมต่อ Arduino สำเร็จ! ระบบพร้อมทำงานแล้ว"); this.isScanning = false;
+
+                    document.getElementById('teach-mode-toggle').checked = false;
+                    setTimeout(() => { if (this.serialWriter) this.serialWriter.write("LOCK_ALL\n").catch(()=>{}); }, 1000);
+                    this.startReading(); 
+                    setTimeout(() => { if (this.serialWriter) this.serialWriter.write("WHO\n").catch(()=>{}); }, 2500);   // 🔵 [CODESYS] ถามว่าใครคุมอยู่
+                } catch (err) { 
+                    this.isScanning = false; document.getElementById('ros-status').innerText = 'WAITING...'; 
+                    if(!err.message.includes("No port selected")) alert("⚠️ เกิดข้อผิดพลาด: " + err.message);
+                }
+            }
+
+            async startReading() {
+                const textDecoder = new TextDecoderStream(); this.readableClosed = this.serialPort.readable.pipeTo(textDecoder.writable);
+                const reader = textDecoder.readable.getReader(); this.serialReader = reader; let buffer = "";
+                try {
+                    while (true) {
+                        const { value, done } = await reader.read(); if (done) break;
+                        buffer += value; let lines = buffer.split('\n'); buffer = lines.pop(); 
+                        for (let line of lines) {
+                            line = line.trim();
+                            if (line.startsWith("LIVE:")) {
+                                let angles = line.substring(5).split(','); 
+                                if (angles.length > 0 && window.robot) {
+                                    for (let i = 0; i < angles.length; i++) {
+                                        let angle = parseInt(angles[i], 10);
+                                        if (!isNaN(angle) && window.robot.joints[i]) {
+                                            // อัปเดตหุ่น 3D เสมอ
+                                            window.robot.joints[i].rotation.z = (angle + visualOffsets[i]) * Math.PI / 180;
+
+                                            // 🟢 ถ้าแกนนี้เปิด Free อยู่ ให้ UI วิ่งตามมือที่จับหุ่นเลย
+                                            // 🔵 [CODESYS] ขณะ CODESYS คุมอยู่ก็ให้ UI วิ่งตามแขนจริงเช่นกัน เพื่อให้เป้าหมายของหน้านี้ตรงกับตำแหน่งจริงตอนได้สิทธิ์คืน
+                                            if ((freedriveModes[i] || cdsOwnsArm) && !isProgramRunning) {
+                                                jointTargets[i] = angle;
+                                                uiGraphTargets[i] = angle; 
+                                                let valDisplay = document.getElementById('val' + (i + 1));
+                                                if(valDisplay) valDisplay.innerText = angle + '°'; 
+                                                document.getElementById('joint'+(i+1)).value = angle;
+                                                document.getElementById('target'+(i+1)).value = angle;
+                                            } else if (!isProgramRunning && !freedriveModes[i]) {
+                                                // อัปเดตแค่ข้อความแสดงองศาจริง
+                                                let valDisplay = document.getElementById('val' + (i + 1));
+                                                if(valDisplay) valDisplay.innerText = angle + '°'; 
+                                            }
+                                        }
+                                    }
+                                    if(window.updateTCP) window.updateTCP();
+                                }
+                            }
+                            else if (line.startsWith("OWNER:")) { window.handleOwnerLine(line.substring(6)); }   // 🔵 [CODESYS]
+                            else if (line.startsWith("RANGE:")) { console.warn(line); alert("⚠️ Arduino ปฏิเสธคำสั่ง: " + line.substring(6).trim()); }   // 🟢 มุมเกินขอบเขต
+                        }
+                    }
+                } catch (e) { console.error("พอร์ตถูกตัดการเชื่อมต่อ:", e); }
+                // 🔌 สาย USB หลุดระหว่างใช้งาน (ไม่ได้กด Disconnect): ปิดพอร์ตให้เรียบร้อยและแสดงสถานะให้ตรง
+                if (!this.isClosing && this.serialReader === reader) {
+                    await this.closePort();
+                    this.resetUi('DISCONNECTED (USB LOST)');
+                }
+            }
+
+            // 🔌 ปิดพอร์ตตามลำดับที่ Web Serial ต้องการ: หยุดอ่าน -> ปิดฝั่งเขียน -> ปิดพอร์ต (COM ว่าง ใช้ Arduino IDE ได้ทันที)
+            async closePort() {
+                this.isClosing = true;
+                const port = this.serialPort, writer = this.serialWriter, reader = this.serialReader;
+                this.serialWriter = null; this.serialReader = null;          // ส่วนอื่นของหน้าเห็นทันทีว่าไม่ได้เชื่อมต่อแล้ว
+                try { if (reader) await reader.cancel(); } catch (e) {}
+                try { if (this.readableClosed) await this.readableClosed; } catch (e) {}
+                try { if (writer) await writer.close(); } catch (e) {}
+                try { if (this.writableClosed) await this.writableClosed; } catch (e) {}
+                try { if (port) await port.close(); } catch (e) { console.warn("ปิดพอร์ตไม่สำเร็จ:", e); }
+                this.serialPort = null; this.readableClosed = null; this.writableClosed = null;
+                this.isClosing = false;
+            }
+
+            resetUi(statusText) {
+                document.getElementById('ros-status').innerText = statusText;
+                document.getElementById('ros-dot').classList.remove('connected');
+                cdsOwnsArm = false;                                          // 🔵 [CODESYS] ไม่ได้เชื่อมต่อ = ไม่รู้ว่าใครคุม
+                if (window.setArmOwnerLock) window.setArmOwnerLock(false);
+                const st = document.getElementById('owner-status');
+                if (st) { st.innerText = 'ผู้ควบคุม: ยังไม่ทราบ (ยังไม่ได้เชื่อมต่อ)'; st.style.color = 'var(--text-muted)'; }
+                const nt = document.getElementById('owner-note'); if (nt) nt.innerText = '';
+            }
+
+            async disconnect() {
+                if (!this.serialPort) return alert("ℹ️ ยังไม่ได้เชื่อมต่อ Arduino");
+                if (isProgramRunning) window.toggleProgram();               // หยุดโปรแกรมของหน้านี้ (ฟังก์ชันนี้ส่ง STOP ให้เอง)
+                else if (!cdsOwnsArm && this.serialWriter) {                // PC คุมอยู่: หยุดแขนก่อนปล่อยพอร์ต / ถ้า CODESYS คุมอยู่ไม่ยุ่ง
+                    try { await this.serialWriter.write("STOP\n"); } catch (e) {}
+                }
+                await this.closePort();
+                this.resetUi('DISCONNECTED');
+                alert("🔌 ตัดการเชื่อมต่อแล้ว พอร์ต COM ว่างแล้ว (อัปโหลดโค้ดหรือกด Scan เพื่อเชื่อมต่อใหม่ได้)");
+            }
+
+            connect() {
+                if (this.ipcRenderer) {
+                    const id = document.getElementById('com-port-select').value;
+                    if(!id) return alert("⚠️ กรุณากดปุ่ม Scan แล้วเลือกพอร์ตก่อนครับ");
+                    this.ipcRenderer.send('connect-to-port', id);
+                } else { alert("⚠ ในโหมดเว็บปกติ ให้ใช้ปุ่ม Scan ค้นหาและเชื่อมต่อพอร์ตได้เลยครับ"); }
+            }
+
+            async sendJointsData() {
+                if(!this.serialWriter) return;
+                if(cdsOwnsArm) return;   // 🔵 [CODESYS] ไม่ส่งคำสั่งเคลื่อนที่ขณะ CODESYS คุมอยู่
+                let degs = jointTargets.map(d => Math.round(d));
+                try { await this.serialWriter.write(`A${degs.join(',')}\n`); } catch(e) {}
+            }
+        }
+        window.robotLink = new RobotConnection();
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.panel-content').forEach(p => p.classList.remove('active'));
+            if(event && event.target && event.target.classList.contains('tab-btn')) event.target.classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+            
+            // 🟢 บังคับให้ Chart.js โหลดใหม่เสมอเมื่อกดเข้าแท็บ เพื่อแก้บั๊กกราฟล่องหนเมื่อซ่อนไว้
+            if(tabId === 'tab-analytics') {
+                setTimeout(() => {
+                    telemetryCharts.forEach(chart => { if(chart) chart.resize(); });
+                    window.redrawLiveCharts(true, !telemetryInterval);   // 🟢 [REC เสถียร] กำลังบันทึก = ช่วงล่าสุด, หยุดแล้ว = ทั้งหมด
+                }, 50);
+            }
+        }
+
+        let currentEditorMode = 'block';
+        function switchEditorMode(mode) {
+            currentEditorMode = mode;
+            document.getElementById('btn-mode-block').classList.toggle('active', mode==='block');
+            document.getElementById('btn-mode-code').classList.toggle('active', mode==='code');
+            document.getElementById('area-block-workspace').style.display = mode==='block' ? 'block' : 'none';
+            document.getElementById('area-code-workspace').style.display = mode==='code' ? 'block' : 'none';
+            if(mode==='code') syncBlocksToCode(); else compileCodeToBlocks();
+        }
+
+        function syncBlocksToCode() {
+            let code = "";
+            commandsData.forEach(cmd => {
+                if (cmd.type === 'MoveJ') code += `MOVEJ [${cmd.val.map(v=>Math.round(v)).join(', ')}]\n`;
+                else if (cmd.type === 'MoveL') code += `MOVEL [${cmd.val.map(v=>Math.round(v)).join(', ')}]\n`;
+                else if (cmd.type === 'Wait') code += `WAIT ${cmd.val}\n`;
+                else if (cmd.type === 'Speed') code += `SPEED ${cmd.val}\n`;
+                else if (cmd.type === 'SetIO') code += `SET_IO PIN_${cmd.pin} ${cmd.state.toUpperCase()}\n`;
+                else if (cmd.type === 'Loop') code += `LOOP ${cmd.val}\n`;
+            });
+            document.getElementById('code-text-area').value = code;
+        }
+
+        function compileCodeToBlocks() {
+            let lines = document.getElementById('code-text-area').value.split('\n');
+            commandsData = [];
+            lines.forEach(line => {
+                let text = line.trim().toUpperCase();
+                if(!text || text.startsWith('//')) return;
+                if(text.startsWith('MOVEJ')) { let m = text.match(/\[(.*?)\]/); if(m) commandsData.push({ type: 'MoveJ', val: m[1].split(',').map(v => parseFloat(v)||0) }); } 
+                else if (text.startsWith('MOVEL')) { let m = text.match(/\[(.*?)\]/); if(m) commandsData.push({ type: 'MoveL', val: m[1].split(',').map(v => parseFloat(v)||0) }); } 
+                else if (text.startsWith('WAIT')) commandsData.push({ type: 'Wait', val: parseFloat(text.replace('WAIT',''))||1 });
+                else if (text.startsWith('SPEED')) commandsData.push({ type: 'Speed', val: parseFloat(text.replace('SPEED',''))||50 });
+                else if (text.startsWith('SET_IO')) { let p = text.split(' '); commandsData.push({ type: 'SetIO', pin: p[1]?p[1].replace('PIN_',''):'1', state: p[2]==='ON'?'on':'off' }); }
+                else if (text.startsWith('LOOP')) commandsData.push({ type: 'Loop', val: parseFloat(text.replace('LOOP',''))||1 }); 
+            });
+            renderBlocks();
+        }
+
+        function dragStart(e, i) { draggedIndex = i; } function dragOver(e) { e.preventDefault(); }
+        function dropBlock(e) { e.preventDefault(); let target = e.target.closest('.robot-block'); let dropIndex = target ? parseInt(target.getAttribute('data-index')) : commandsData.length; if (draggedIndex === null || draggedIndex === dropIndex) return; let item = commandsData.splice(draggedIndex, 1)[0]; if (draggedIndex < dropIndex) dropIndex--; commandsData.splice(dropIndex, 0, item); renderBlocks(); }
+
+        function updateBlockData(i, f, v) { 
+            if(f === 'MoveJ' || f === 'MoveL') { commandsData[i].val = v.split(',').map(x => Math.round(parseFloat(x)) || 0); }
+            else if(f === 'pin') commandsData[i].pin = v; else if(f === 'state') commandsData[i].state = v; else commandsData[i].val = parseFloat(v) || 0; 
+            saveToAutoSave(); 
+        }
+
+        function addVisualBlock(type) { 
+            let cmd = { type: type }; 
+            if (type === 'Home') { cmd.type = 'MoveJ'; cmd.val = [0, 0, 0, 0, 0, 0]; }
+            else if (type === 'MoveJ') cmd.val = [...jointTargets]; 
+            else if (type === 'MoveL') { cmd.val = [Math.round(tcpPos.x), Math.round(tcpPos.y), Math.round(tcpPos.z)]; }
+            else if (type === 'Wait') cmd.val = 1.0; else if (type === 'Speed') cmd.val = 50; 
+            else if (type === 'SetIO') { cmd.pin = '1'; cmd.state = 'on'; } 
+            else if (type === 'Loop') cmd.val = 3; 
+            commandsData.push(cmd); renderBlocks(); 
+        }
+
+        function deleteBlock(i) { commandsData.splice(i, 1); renderBlocks(); }
+        function clearProgramWorkspace() { commandsData = []; document.getElementById('code-text-area').value = ""; renderBlocks(); }
+        function saveWaypoint() { addVisualBlock('MoveJ'); }
+
+        function saveToAutoSave() {
+            localStorage.setItem('ar4_autosave_blocks', JSON.stringify(commandsData));
+        }
+
+        function renderBlocks() {
+            const container = document.getElementById('block-container'); container.innerHTML = '';
+            commandsData.forEach((cmd, idx) => {
+                let b = document.createElement('div'); b.className = `robot-block block-${cmd.type.toLowerCase()}`; b.setAttribute('draggable', 'true'); b.setAttribute('data-index', idx); b.ondragstart = (e) => dragStart(e, idx);
+                b.oncontextmenu = (e) => toggleBlockType(e, idx); 
+
+                let c = "";
+                if (cmd.type === 'MoveJ') c = `MoveJ (องศา) <input class="block-input" style="width:100px" value="${cmd.val.map(v=>Math.round(v)).join(', ')}" onchange="updateBlockData(${idx},'MoveJ',this.value)">`;
+                else if (cmd.type === 'MoveL') c = `MoveL (X,Y,Z) <input class="block-input" style="width:100px" value="${cmd.val.map(v=>Math.round(v)).join(', ')}" onchange="updateBlockData(${idx},'MoveL',this.value)">`;
+                else if (cmd.type === 'Wait') c = `Wait <input type="text" class="block-input" style="width:40px" value="${cmd.val}" onchange="updateBlockData(${idx},'val',this.value)"> S`;
+                else if (cmd.type === 'Speed') c = `Speed <input type="text" class="block-input" style="width:40px" value="${cmd.val}" onchange="updateBlockData(${idx},'val',this.value)"> %`;
+                else if (cmd.type === 'SetIO') c = `IO <input type="text" class="block-input" style="width:30px" value="${cmd.pin}" onchange="updateBlockData(${idx},'pin',this.value)"> <select class="block-select" onchange="updateBlockData(${idx},'state',this.value)"><option value="on" ${cmd.state==='on'?'selected':''}>ON</option><option value="off" ${cmd.state==='off'?'selected':''}>OFF</option></select>`;
+                else if (cmd.type === 'Loop') c = `Loop <input type="text" class="block-input" style="width:40px" value="${cmd.val}" onchange="updateBlockData(${idx},'val',this.value)"> รอบ`; 
+
+                b.innerHTML = `<div style="display:flex; gap:5px; align-items:center;"><b>#${idx+1}</b> ${c}</div><button class="block-delete-btn" onclick="deleteBlock(${idx})">X</button>`; container.appendChild(b);
+            });
+            if(currentEditorMode === 'code') syncBlocksToCode();
+            saveToAutoSave(); 
+        }
+
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+        // 🟢 [REC เสถียร] ต่อ Arduino อยู่: รอจนมุมจริงของทุกแกน (ค่า LIVE ที่ Arduino ส่งกลับ) ถึงเป้าหมาย
+        //    ไม่ได้ต่อ (โหมดจำลอง): ไม่ต้องรอ เพราะหุ่น 3D วิ่งตามเส้น Target อยู่แล้ว (เหมือนเดิม)
+        //    เผื่อเวลาไว้ ถ้าเกินกำหนดจะทำคำสั่งถัดไปต่อ (เหมือนพฤติกรรมเดิม) และเตือนไว้ใน Console
+        async function waitForArmArrival(endJoints, travelTimeMs) {
+            if (!(window.robotLink && window.robotLink.serialWriter)) return true;
+            const deadline = performance.now() + Math.max(3000, travelTimeMs * 0.5);
+            while (isProgramRunning) {
+                let arrived = true;
+                for (let j = 0; j < 6; j++) {
+                    if (freedriveModes[j]) continue;
+                    let act = window.robot ? (window.robot.joints[j].rotation.z * 180 / Math.PI) - visualOffsets[j] : Math.round(endJoints[j]);
+                    if (Math.abs(act - Math.round(endJoints[j])) > 0.5) { arrived = false; break; }
+                }
+                if (arrived) return true;
+                if (performance.now() > deadline) { console.warn('⚠️ แขนยังไม่ถึงเป้าหมายภายในเวลาที่เผื่อไว้ จึงทำคำสั่งถัดไปต่อ'); return false; }
+                await sleep(20);
+            }
+            return false;
+        }
+        function checkSelfCollision(joints) { return joints[2] < -50; }
+        // 🟢 ขอบเขตมุมของแต่ละข้อต่อ (องศา) ให้ตรงกับตารางขอบเขตในเล่มและ jointMinDeg/jointMaxDeg ในเฟิร์มแวร์
+        const JOINT_LIMITS = [[-75, 75], [-60, 60], [-60, 60], [-180, 180], [-180, 180], [-180, 180]];
+        function limitViolation(joints) {
+            for (let i = 0; i < 6; i++) { const v = Number(joints[i]); if (isNaN(v) || v < JOINT_LIMITS[i][0] || v > JOINT_LIMITS[i][1]) return i; }
+            return -1;
+        }
+        function showBlockWarning(index) {
+            let targetInput = document.getElementById('target'+(index+1));
+            if(targetInput) { 
+                let oldBg = targetInput.style.backgroundColor; targetInput.style.backgroundColor = "#ffcccc"; 
+                setTimeout(() => { targetInput.style.backgroundColor = oldBg; targetInput.value = Math.round(jointTargets[index]); }, 800); 
+            }
+        }
+
+        for(let i=0; i<6; i++) {
+            let slider = document.getElementById('joint'+(i+1)); let valDisplay = document.getElementById('val'+(i+1)); let targetInput = document.getElementById('target'+(i+1));
+            slider.addEventListener('input', function() {
+                if(isProgramRunning || freedriveModes[i]) return; 
+                let d = Math.round(Number(this.value)); let tempJoints = jointTargets.slice(); tempJoints[i] = d;
+                if(checkSelfCollision(tempJoints)) { this.value = jointTargets[i]; showBlockWarning(i); return; }
+                jointTargets[i] = d; targetInput.value = d; uiGraphTargets[i] = d;
+                if(!window.robotLink || !window.robotLink.serialWriter) valDisplay.innerText = d + '°';
+                if(window.robotLink) window.robotLink.sendJointsData(); 
+            });
+            targetInput.addEventListener('change', function() {
+                if(isProgramRunning || freedriveModes[i]) return;  
+                let d = Math.round(Number(this.value)); if(isNaN(d)) d = jointTargets[i]; 
+                d = Math.max(Number(slider.min), Math.min(Number(slider.max), d)); let tempJoints = jointTargets.slice(); tempJoints[i] = d;
+                if(checkSelfCollision(tempJoints)) { this.value = jointTargets[i]; showBlockWarning(i); return; }
+                jointTargets[i] = d; this.value = d; slider.value = d; uiGraphTargets[i] = d; 
+                if(!window.robotLink || !window.robotLink.serialWriter) valDisplay.innerText = d + '°';
+                if(window.robotLink) window.robotLink.sendJointsData();
+            });
+            targetInput.addEventListener('keydown', function(e) { if(e.key === 'Enter') this.blur(); });
+        }
+
+        let jogTimeout = null; let jogInterval = null;
+        window.jogJoint = function(j, dir) {
+            if(isProgramRunning || freedriveModes[j-1]) return; 
+            let i = j - 1; let st = Math.round(Number(document.getElementById('jog-step').value)) || 1;
+            let sl = document.getElementById('joint'+j); let nVal = Math.max(Number(sl.min), Math.min(Number(sl.max), jointTargets[i] + (dir * st)));
+            let tempJoints = jointTargets.slice(); tempJoints[i] = nVal;
+            if(checkSelfCollision(tempJoints)) { showBlockWarning(i); return; }
+            jointTargets[i] = nVal; sl.value = nVal; document.getElementById('target'+j).value = nVal; uiGraphTargets[i] = nVal;
+            if(!window.robotLink || !window.robotLink.serialWriter) document.getElementById('val'+j).innerText = nVal + '°';
+            if(window.robotLink) window.robotLink.sendJointsData();
+        }
+        window.startJog = function(j, dir) { if (isProgramRunning || freedriveModes[j-1]) return; jogJoint(j, dir); jogTimeout = setTimeout(() => { jogInterval = setInterval(() => { jogJoint(j, dir); }, 50); }, 400); };
+        window.stopJog = function() { clearTimeout(jogTimeout); clearInterval(jogInterval); };
+
+        window.setCurrentAsHome = async function() { 
+            if(cdsOwnsArm) return alert("⚠️ CODESYS เป็นผู้ควบคุมอยู่ กรุณากด 'ขอสิทธิ์ให้หน้านี้' ก่อนครับ");   // 🔵 [CODESYS]
+            if(window.robotLink && window.robotLink.serialWriter) { try { await window.robotLink.serialWriter.write("home\n"); } catch(e) {} }
+            for(let i=0; i<6; i++) {
+                if(freedriveModes[i]) continue;
+                jointTargets[i] = 0; uiGraphTargets[i] = 0; document.getElementById('joint'+(i+1)).value = 0; 
+                document.getElementById('val'+(i+1)).innerText = '0°'; document.getElementById('target'+(i+1)).value = 0;
+                if(window.robot) window.robot.joints[i].rotation.z = visualOffsets[i] * Math.PI / 180;
+            }
+            if(window.updateTCP) window.updateTCP(); 
+            homeA = [0, 0, 0, 0, 0, 0]; alert("✅ Calibrate สำเร็จ! ตำแหน่งปัจจุบันถูกตั้งเป็นศูนย์แล้ว"); 
+        }
+
+        window.goHome = function() { 
+            if(isProgramRunning || cdsOwnsArm) return;   // 🔵 [CODESYS]
+            for(let i=0; i<6; i++) {
+                if(freedriveModes[i]) continue;
+                jointTargets[i] = homeA[i]; uiGraphTargets[i] = homeA[i];
+                document.getElementById('joint'+(i+1)).value = homeA[i]; 
+                document.getElementById('val'+(i+1)).innerText = homeA[i] + '°'; document.getElementById('target'+(i+1)).value = homeA[i];
+            }
+            if(window.robotLink) window.robotLink.sendJointsData();
+        }
+
+        function solveIK(x, y, z, currentJoints) {
+            // 🟢 L3 = ระยะจากแกน J3 ถึงจุด TCP ของแบบจำลองสามมิติ (ตำแหน่งที่แสดงบนหน้าจอ) เมื่อข้อมือเหยียดตรง
+            //    แกน Y บนหน้าจอมีทิศตรงข้ามกับทิศบวกของ J1 จึงใช้ J1 = -atan2(y, x)
+            const d1 = 169.77, a1 = 64.2, a2 = 305.0, L3 = 248.0; let targetJoints = [0, 0, 0, 0, 0, 0]; let j1 = 0;
+            if (Math.abs(x) > 0.001 || Math.abs(y) > 0.001) { j1 = -Math.atan2(y, x); } else if (currentJoints) { j1 = currentJoints[0] * (Math.PI / 180); }
+            let r = Math.sqrt(x*x + y*y) - a1; let s = z - d1; let D = (r*r + s*s - a2*a2 - L3*L3) / (2 * a2 * L3);
+            if (isNaN(D) || D > 1.0001 || D < -1.0001) { console.warn(`⚠️ พิกัด X:${Math.round(x)}, Y:${Math.round(y)}, Z:${Math.round(z)} อยู่นอกระยะการทำงาน`); return currentJoints || jointTargets; }
+            D = Math.max(-1, Math.min(1, D));
+            let j3_rad = Math.atan2(-Math.sqrt(1 - D*D), D); let j2_rad = Math.atan2(s, r) - Math.atan2(L3 * Math.sin(j3_rad), a2 + L3 * Math.cos(j3_rad));
+            targetJoints[0] = j1 * (180 / Math.PI); targetJoints[1] = 90 - (j2_rad * (180 / Math.PI)); targetJoints[2] = j3_rad * (180 / Math.PI) + 90; /* J3 = 0 เมื่อแขนท่อนล่างตั้งฉากกับท่อนบน */ 
+            if (currentJoints) {
+                targetJoints[3] = currentJoints[3]; targetJoints[5] = currentJoints[5]; 
+                let currentPitch = currentJoints[1] + currentJoints[2] + currentJoints[4]; targetJoints[4] = currentPitch - (targetJoints[1] + targetJoints[2]);
+            } else { targetJoints[3] = 0; targetJoints[4] = -(targetJoints[1] + targetJoints[2]); targetJoints[5] = 0; }
+            for(let i=0; i<6; i++) { if(isNaN(targetJoints[i])) return currentJoints || jointTargets; }
+            return targetJoints;
+        }
+
+        const DH_PARAMS = [
+            { a: 64.2,  alpha: -Math.PI/2, d: 169.77 }, { a: 305.0, alpha: 0, d: 0 }, { a: 0, alpha:  Math.PI/2, d: 0 },         
+            { a: 0, alpha: -Math.PI/2, d: 222.63 }, { a: 0, alpha:  Math.PI/2, d: 0 }, { a: 0, alpha: 0, d: 36.25 }   
+        ];
+
+        function solveFK(jointsDegree) {
+            let T = new THREE.Matrix4(); T.identity();
+            for (let i = 0; i < 6; i++) {
+                let theta = jointsDegree[i] * (Math.PI / 180); if (i === 2) theta -= Math.PI / 2;
+                let a = DH_PARAMS[i].a, alpha = DH_PARAMS[i].alpha, d = DH_PARAMS[i].d;
+                let cosT = Math.cos(theta), sinT = Math.sin(theta), cosA = Math.cos(alpha), sinA = Math.sin(alpha);
+                let Ti = new THREE.Matrix4(); Ti.set( cosT, -sinT * cosA,  sinT * sinA, a * cosT, sinT,  cosT * cosA, -cosT * sinA, a * sinT, 0, sinA, cosA, d, 0, 0, 0, 1 ); T.multiply(Ti);
+            }
+            return { x: T.elements[12], y: T.elements[13], z: T.elements[14] };
+        }
+
+        window.toggleBlockType = function(e, index) {
+            e.preventDefault(); let cmd = commandsData[index];
+            if (cmd.type === 'MoveJ') {
+                cmd.type = 'MoveL'; let backupRots = [];
+                for(let i=0; i<6; i++) { backupRots[i] = window.robot.joints[i].rotation.z; window.robot.joints[i].rotation.z = (cmd.val[i] + visualOffsets[i]) * Math.PI / 180; }
+                window.robot.root.updateMatrixWorld(true); let tempTcp = new THREE.Vector3(); window.robot.joints[5].getWorldPosition(tempTcp);
+                for(let i=0; i<6; i++) { window.robot.joints[i].rotation.z = backupRots[i]; } window.robot.root.updateMatrixWorld(true);
+                cmd.val = [Math.round(tempTcp.x), Math.round(tempTcp.y), Math.round(tempTcp.z)];
+            } else if (cmd.type === 'MoveL') { cmd.type = 'MoveJ'; cmd.val = [...jointTargets]; }
+            renderBlocks(); 
+        }
+
+        async function executeMoveL(targetX, targetY, targetZ) {
+            let startX = tcpPos.x || 0; let startY = tcpPos.y || 0; let startZ = tcpPos.z || 0;
+            let distance = Math.sqrt(Math.pow(targetX-startX, 2) + Math.pow(targetY-startY, 2) + Math.pow(targetZ-startZ, 2));
+            let steps = Math.max(1, Math.floor(distance / 2.0)); let initialJoints = [...jointTargets]; 
+            for (let i = 1; i <= steps; i++) {
+                if(!isProgramRunning) break; let t = i / steps;
+                let currentX = startX + (targetX - startX) * t; let currentY = startY + (targetY - startY) * t; let currentZ = startZ + (targetZ - startZ) * t;
+                let calculatedJoints = solveIK(currentX, currentY, currentZ, initialJoints);
+                // 🟢 กันแขนสะบัด: หยุด MoveL ถ้ามุมเกินขอบเขต ชนตัวเอง หรือเปลี่ยนเกิน 10° ในช่วงเดียว (2 มม.)
+                { const bad = limitViolation(calculatedJoints); let jump = 0;
+                  for (let j = 0; j < 6; j++) { if (!freedriveModes[j]) jump = Math.max(jump, Math.abs(calculatedJoints[j] - jointTargets[j])); }
+                  if (bad >= 0 || checkSelfCollision(calculatedJoints) || jump > 10) {
+                      isProgramRunning = false;
+                      alert(bad >= 0 ? `⚠️ MoveL: J${bad+1} = ${Math.round(calculatedJoints[bad])}° เกินขอบเขต (${JOINT_LIMITS[bad][0]} ถึง ${JOINT_LIMITS[bad][1]}) จึงหยุดคำสั่ง`
+                                     : (jump > 10 ? `⚠️ MoveL: มุมข้อต่อเปลี่ยน ${jump.toFixed(1)}° ในช่วงเดียว จึงหยุดคำสั่ง` : `⚠️ MoveL: ตรวจพบการชน จึงหยุดคำสั่ง`));
+                      break;
+                  } }
+                for(let j=0; j<6; j++) {
+                    if (freedriveModes[j]) continue; 
+                    jointTargets[j] = Math.round(calculatedJoints[j]); 
+                    uiGraphTargets[j] = jointTargets[j];
+                    let slider = document.getElementById('joint'+(j+1)); if(slider) slider.value = jointTargets[j];
+                    let valDisp = document.getElementById('val'+(j+1)); if(valDisp) valDisp.innerText = jointTargets[j] + '°';
+                    let targetInp = document.getElementById('target'+(j+1)); if(targetInp) targetInp.value = jointTargets[j];
+                }
+                if(window.robotLink && window.robotLink.serialWriter) { await window.robotLink.sendJointsData(); }
+                let moveLDelay = 50 * (50 / globalSpeed); await sleep(moveLDelay);
+            }
+        }
+
+        window.runCompiledProgram = async function() {
+            if(isProgramRunning) return; 
+            if(currentEditorMode === 'code') compileCodeToBlocks();
+            if(!commandsData.length) return alert("ไม่มีคำสั่งครับ");
+
+            isProgramRunning = true; globalSpeed = 50; let loopCounters = {}; 
+            let loopDisplay = document.getElementById('loop-display');
+            let speedDisplay = document.getElementById('speed-display');
+
+            speedDisplay.innerText = "⚡ Speed: 50%";
+            window.activeLoopCount = 1;
+
+            let autoRecord = document.getElementById('auto-record-chk') && document.getElementById('auto-record-chk').checked;
+            if(autoRecord) { clearTelemetry(); startTelemetry(); }
+
+            const playBtn1 = document.getElementById('main-play-btn'); const playBtn2 = document.getElementById('side-play-btn');
+            if(playBtn1) { playBtn1.innerHTML = "⏹️ Stop Program"; playBtn1.className = "btn-action btn-danger"; }
+            if(playBtn2) { playBtn2.innerText = "Stop"; playBtn2.style.background = "var(--accent-red)"; }
+
+            for(let i=0; i<commandsData.length; i++) {
+                if(!isProgramRunning) break; 
+                document.querySelectorAll('.robot-block').forEach(b => b.style.opacity='0.5');
+                let ab = document.querySelector(`.robot-block[data-index="${i}"]`); if(ab) { ab.style.opacity='1'; ab.style.transform='scale(1.02)'; }
+
+                let c = commandsData[i];
+                if(c.type === 'Speed') {
+                    globalSpeed = c.val; 
+                    if(speedDisplay) speedDisplay.innerText = `⚡ Speed: ${globalSpeed}%`;
+                    if(window.robotLink && window.robotLink.serialWriter) { try { await window.robotLink.serialWriter.write(`S${globalSpeed}\n`); } catch(e) {} }
+                }
+                else if(c.type === 'MoveJ') {
+                    if (checkSelfCollision(c.val)) { alert(`⚠️ ตรวจพบการชน!`); isProgramRunning = false; break; }
+                    { const bad = limitViolation(c.val); if (bad >= 0) { alert(`⚠️ MoveJ: J${bad+1} = ${c.val[bad]}° เกินขอบเขต (${JOINT_LIMITS[bad][0]} ถึง ${JOINT_LIMITS[bad][1]})`); isProgramRunning = false; break; } }
+                    // 🟢 [REC เสถียร] เวลาเคลื่อนที่คิดจากแกนที่ต้องหมุนจำนวนสเต็ปมากที่สุด (แบบเดียวกับ MultiStepper ใน Arduino)
+                    let maxSteps = 0; for(let j=0; j<6; j++) { if (freedriveModes[j]) continue; let st = Math.abs(Math.round(c.val[j]) - jointTargets[j]) * STEPS_PER_DEGREE[j]; if (st > maxSteps) maxSteps = st; }
+
+                    let startJoints = [...jointTargets];
+                    let endJoints = [...c.val];
+
+                    if(window.robotLink && window.robotLink.serialWriter) { 
+                        let degs = endJoints.map(d => Math.round(d));
+                        window.robotLink.serialWriter.write(`A${degs.join(',')}\n`).catch(()=>{}); 
+                    }
+
+                    let stepsPerSec = 100 + ((globalSpeed - 1) * (2900 / 99));
+                    let travelTimeMs = (maxSteps / stepsPerSec) * 1000 * HW_TIME_SCALE; 
+
+                    // 🟢 [REC เสถียร] เส้น Target คิดจากเวลาจริง (performance.now) ไม่ใช่นับจำนวนครั้งที่รอ 50 ms
+                    //    ต่อให้เครื่องหน่วง เส้น Target ก็ใช้เวลาเท่ากับแขนจริงทุกรอบ
+                    let moveStart = performance.now();
+                    while (isProgramRunning) {
+                        let t = travelTimeMs > 0 ? Math.min(1, (performance.now() - moveStart) / travelTimeMs) : 1;
+                        for(let j=0; j<6; j++) {
+                            if (freedriveModes[j]) continue; 
+                            uiGraphTargets[j] = startJoints[j] + (endJoints[j] - startJoints[j]) * t;
+                            jointTargets[j] = Math.round(endJoints[j]); 
+
+                            let slider = document.getElementById('joint'+(j+1)); if(slider) slider.value = Math.round(uiGraphTargets[j]);
+                            let valDisp = document.getElementById('val'+(j+1)); if(valDisp) valDisp.innerText = Math.round(uiGraphTargets[j]) + '°';
+                            let tarInp = document.getElementById('target'+(j+1)); if(tarInp) tarInp.value = Math.round(uiGraphTargets[j]);
+                        }
+                        if (t >= 1) break;
+                        await sleep(50);
+                    }
+
+                    for(let j=0; j<6; j++) { 
+                        if (freedriveModes[j]) continue; 
+                        uiGraphTargets[j] = Math.round(endJoints[j]); 
+                        jointTargets[j] = Math.round(endJoints[j]); 
+                    }
+                    // 🟢 [REC เสถียร] รอให้แขนจริงถึงเป้าหมายก่อน แล้วค่อยพัก 0.5 วินาที
+                    //    (เดิมนับเวลาตามเส้นจำลอง ถ้าเครื่องหน่วง แขนต้องหยุดรอที่จุดหมายนานขึ้นเรื่อย ๆ)
+                    await waitForArmArrival(endJoints, travelTimeMs);
+                    await sleep(500); 
+                }
+                else if(c.type === 'MoveL') { await executeMoveL(c.val[0], c.val[1], c.val[2]); await sleep(500); }
+                else if(c.type === 'Wait') { await sleep(c.val * 1000); }
+                else if(c.type === 'SetIO') {
+                    if(window.robotLink && window.robotLink.serialWriter) { let stateVal = c.state === 'on' ? 1 : 0; try { await window.robotLink.serialWriter.write(`O${c.pin},${stateVal}\n`); } catch(e) {} }
+                    await sleep(200); 
+                }
+                else if(c.type === 'Loop') {
+                    if(typeof loopCounters[i] === 'undefined') loopCounters[i] = 0;
+                    loopCounters[i]++; 
+
+                    window.activeLoopCount = loopCounters[i] + 1;
+                    if(loopDisplay) loopDisplay.innerText = `[ 🔄 Loop: รอบที่ ${loopCounters[i]} / ${c.val} ]`;
+
+                    if(loopCounters[i] < c.val) { 
+                        i = -1; 
+                    } else { 
+                        loopCounters[i] = 0; 
+                        window.activeLoopCount = 1; 
+                        if(loopDisplay) loopDisplay.innerText = ""; 
+                    }
+                    await sleep(200);
+                }
+            }
+
+            isProgramRunning = false; 
+            window.activeLoopCount = 1; 
+            if(autoRecord) { stopTelemetry(); } 
+            if(loopDisplay) loopDisplay.innerText = ""; 
+
+            document.getElementById('teach-mode-toggle').disabled = false;
+            document.querySelectorAll('input[type="checkbox"][id^="free-j"]').forEach(t => t.disabled = false);
+            window.setArmOwnerLock(cdsOwnsArm);   // 🔵 [CODESYS]
+
+            document.querySelectorAll('.robot-block').forEach(b => { b.style.opacity='1'; b.style.transform='scale(1)'; });
+            if(playBtn1) { playBtn1.innerHTML = "▶️ Run Full Program"; playBtn1.className = "btn-action btn-success"; }
+            if(playBtn2) { playBtn2.innerText = "Play"; playBtn2.style.background = "var(--accent-green)"; }
+        }
+
+        const c3D = document.getElementById('canvas-container'); const renderer = new THREE.WebGLRenderer({ antialias: true }); renderer.setSize(c3D.clientWidth, c3D.clientHeight); renderer.setPixelRatio(window.devicePixelRatio); renderer.autoClear = false; c3D.appendChild(renderer.domElement);
+        const scene = new THREE.Scene(); scene.background = new THREE.Color(0xf4f6f9);
+        const camera = new THREE.PerspectiveCamera(45, c3D.clientWidth / c3D.clientHeight, 0.1, 5000); camera.up.set(0, 0, 1); camera.position.set(800, -800, 600);
+        const controls = new THREE.OrbitControls(camera, renderer.domElement); controls.target.set(0,0,200); controls.enableDamping = true;
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7)); const dl = new THREE.DirectionalLight(0xffffff, 0.6); dl.position.set(1000, 1000, 1000); scene.add(dl);
+        const grid = new THREE.PolarGridHelper(500, 16, 8, 64, 0x999999, 0xdddddd); grid.rotation.x = Math.PI/2; scene.add(grid);
+        const baseAx = new THREE.AxesHelper(150); baseAx.visible = false; scene.add(baseAx); const axScene = new THREE.Scene(); const axCam = new THREE.PerspectiveCamera(50, 1, 0.1, 10); axCam.up.set(0, 0, 1); axScene.add(new THREE.AxesHelper(1.2));
+
+        function mkLabel(txt, col, s=35) {
+            let cv = document.createElement('canvas'); cv.width=64; cv.height=64; let cx = cv.getContext('2d'); cx.fillStyle=col; cx.font='bold 46px Arial'; cx.textAlign='center'; cx.textBaseline='middle'; cx.fillText(txt,32,32);
+            let sp = new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(cv), depthTest:false})); sp.scale.set(s,s,s); sp.visible = false; return sp;
+        }
+
+        const bX=mkLabel('X','#ff0000'); bX.position.set(165,0,0); scene.add(bX); const bY=mkLabel('Y','#00aa00'); bY.position.set(0,165,0); scene.add(bY); const bZ=mkLabel('Z','#0000ff'); bZ.position.set(0,0,165); scene.add(bZ);
+        const gX=mkLabel('X','#ff0000',0.35); gX.visible=true; gX.position.set(1.4,0,0); axScene.add(gX); const gY=mkLabel('Y','#00aa00',0.35); gY.visible=true; gY.position.set(0,1.4,0); axScene.add(gY); const gZ=mkLabel('Z','#0000ff',0.35); gZ.visible=true; gZ.position.set(0,0,1.4); axScene.add(gZ);
+
+        const stls = ["Link Base-1.STL", "Link Base-2.STL", "Link Base-3.STL", "Link 1-1.STL", "Link 1-2.STL", "Link 2-1.STL", "Link 2-2.STL", "Link 2-3.STL", "Link 3-1.STL", "Link 3-2.STL", "Link 4-1.STL", "Link 4-2.STL", "Link 5-1.STL", "Link 5-2.STL", "Link 6-1.STL", "Link 6-2.STL"];
+        const cols = {"Link Base-1.STL":0x34495e, "Link Base-2.STL":0xdddddd, "Link Base-3.STL":0xaaaaaa, "Link 1-1.STL":0xffffff, "Link 1-2.STL":0xaaaaaa, "Link 2-1.STL":0xffffff, "Link 2-2.STL":0x34495e, "Link 2-3.STL":0xaaaaaa, "Link 3-1.STL":0xffffff, "Link 3-2.STL":0xaaaaaa, "Link 4-1.STL":0xffffff, "Link 4-2.STL":0x34495e,  "Link 5-1.STL":0xffffff, "Link 5-2.STL":0xaaaaaa, "Link 6-1.STL":0x34495e, "Link 6-2.STL":0xdddddd};
+        const vops = {"Link Base-1.STL":[], "Link Base-2.STL":[], "Link Base-3.STL":[], "Link 1-1.STL":[{type:'rx',val:180},{type:'rz',val:-90},{type:'t',x:0,y:0,z:-92}], "Link 1-2.STL":[], "Link 2-1.STL":[{type:'rz',val:-90},{type:'rx',val:270},{type:'t',x:-64.15,y:77.78,z:8.87}], "Link 2-2.STL":[], "Link 2-3.STL":[], "Link 3-1.STL":[{type:'rz',val:180},{type:'rx',val:180},{type:'t',x:0,y:305,z:-27.84}], "Link 3-2.STL":[], "Link 4-1.STL":[{type:'ry',val:90},{type:'rx',val:180},{type:'t',x:-36.7,y:0,z:-75.94}], "Link 4-2.STL":[],"Link 5-1.STL":[{type:'rz',val:180},{type:'ry',val:90},{type:'t',x:147,y:0,z:44.88}], "Link 5-2.STL":[], "Link 6-1.STL":[{type:'ry',val:90},{type:'t',x:43.3,y:0,z:25}], "Link 6-2.STL":[]};
+        const robotMeshObjects = [];
+
+        // 🟢 โมเดล CAD ประกอบกลับด้านซ้าย-ขวากับแขนจริง (แขนท่อนบนอยู่คนละฝั่ง) จึงสะท้อนเฉพาะส่วนแขน (ตั้งแต่ J1 ขึ้นไป)
+        //    ในแนวแกน Y และกลับทิศการแสดงผลของ J1, J4, J6 เพื่อให้ทิศการหมุน มุม และพิกัด TCP ทำงานเหมือนเดิม
+        //    (ถ้าต้องการกลับไปแบบเดิม ให้ตั้ง MIRROR_ARM = false)
+        const MIRROR_ARM = true;
+        const FLIP_JOINT = MIRROR_ARM ? { "Link 1-1.STL": true, "Link 4-1.STL": true, "Link 6-1.STL": true } : {};
+        // 🟢 สเต็ปเปอร์ J4 ที่ข้อศอก (โคนแขนท่อน 30.5 ซม.) ในโมเดล CAD ติดอยู่ใต้แขน แต่ของจริงติดอยู่ด้านบน
+        //    จึงพลิกเฉพาะรูปทรงของชิ้นข้อศอก (Link 3-1 และ 3-2) บน-ล่าง รอบระนาบที่มีแกน J3 และแกน J4 อยู่
+        //    แกนหมุน เฟรมข้อต่อ มุม และพิกัด TCP เหมือนเดิมทุกอย่าง เป็นการแก้หน้าตาอย่างเดียว
+        //    (ถ้าต้องการกลับไปแบบเดิม ให้ตั้ง ELBOW_MOTOR_ON_TOP = false)
+        const ELBOW_MOTOR_ON_TOP = true;
+        const FLIP_MESH_UPDOWN = ELBOW_MOTOR_ON_TOP ? { "Link 3-1.STL": true, "Link 3-2.STL": true } : {};
+        window.robot = (function() {
+            const nds = {};
+            stls.forEach(n => {
+                nds[n] = { asm:new THREE.Group(), base:new THREE.Group(), joint:new THREE.Group(), mesh:new THREE.Group() };
+                nds[n].asm.add(nds[n].base);
+                if (FLIP_MESH_UPDOWN[n]) nds[n].mesh.scale.set(1, -1, 1); // พลิกเฉพาะรูปทรง ไม่กระทบข้อต่อถัดไป
+                if (FLIP_JOINT[n]) {
+                    // rotation.z ของข้อต่อนี้จะหมุนรอบแกน -Z (กลับทิศ) โดยไม่ต้องแก้โค้ดส่วนอื่นที่อ่าน/เขียน rotation.z
+                    const pre = new THREE.Group(), post = new THREE.Group();
+                    pre.rotation.x = Math.PI; post.rotation.x = Math.PI;
+                    nds[n].base.add(pre); pre.add(nds[n].joint); nds[n].joint.add(post); post.add(nds[n].mesh);
+                    nds[n].out = post;
+                } else {
+                    nds[n].base.add(nds[n].joint); nds[n].joint.add(nds[n].mesh);
+                    nds[n].out = nds[n].joint;
+                }
+                let mat = new THREE.Matrix4(), tmp = new THREE.Matrix4();
+                vops[n].forEach(op => { tmp.identity(); if(op.type==='t') tmp.makeTranslation(op.x, op.y, op.z); else if(op.type==='rx') tmp.makeRotationX(op.val*Math.PI/180); else if(op.type==='ry') tmp.makeRotationY(op.val*Math.PI/180); else if(op.type==='rz') tmp.makeRotationZ(op.val*Math.PI/180); mat.multiply(tmp); });
+                nds[n].base.matrixAutoUpdate = false; nds[n].base.matrix.copy(mat);
+            });
+            // ต่อชิ้นส่วนตามลำดับ (ชิ้นถัดไปติดกับข้อต่อของชิ้นก่อนหน้า)
+            for (let k = 1; k < stls.length; k++) {
+                const parent = nds[stls[k - 1]].out, child = nds[stls[k]].asm;
+                if (MIRROR_ARM && stls[k] === "Link 1-1.STL") {
+                    const armMirror = new THREE.Group(); armMirror.scale.set(1, -1, 1);
+                    parent.add(armMirror); armMirror.add(child);
+                } else {
+                    parent.add(child);
+                }
+            }
+            return { root: nds["Link Base-1.STL"].asm, joints: [nds["Link 1-1.STL"].joint, nds["Link 2-1.STL"].joint, nds["Link 3-1.STL"].joint, nds["Link 4-1.STL"].joint, nds["Link 5-1.STL"].joint, nds["Link 6-1.STL"].joint], nds: nds };
+        })();
+        scene.add(window.robot.root);
+        const tcpAx = new THREE.AxesHelper(100); tcpAx.visible = false; window.robot.joints[5].add(tcpAx); 
+
+        const debugToggle = document.getElementById('debug-toggle');
+        if(debugToggle) {
+            debugToggle.addEventListener('change', e => {
+                [baseAx, tcpAx].forEach(x => x.visible = e.target.checked); [bX,bY,bZ].forEach(x => x.visible = e.target.checked);
+                robotMeshObjects.forEach(m => { m.material.transparent = e.target.checked; m.material.opacity = e.target.checked ? 0.4 : 1.0; m.material.needsUpdate = true; });
+            });
+        }
+
+        const parser = new THREE.STLLoader(); let lCount = 0;
+
+        function checkLoadComplete() {
+            lCount++;
+            let ld = document.getElementById('loading'); 
+            if(ld) ld.innerText = 'Loading 3D... ' + Math.round((lCount / stls.length) * 100) + '%';
+            if(lCount >= stls.length && ld) { 
+                ld.style.display='none'; 
+                if(debugToggle) debugToggle.dispatchEvent(new Event('change')); 
+            }
+        }
+
+        stls.forEach(n => {
+            try {
+                let arrayBuffer;
+                if (typeof require !== 'undefined') {
+                    const fs = require('fs');
+                    const path = require('path');
+                    const filePath = path.join(__dirname || process.cwd(), 'meshes', n);
+                    const buffer = fs.readFileSync(filePath);
+                    arrayBuffer = buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
+
+                    let m = new THREE.Mesh(parser.parse(arrayBuffer), new THREE.MeshPhongMaterial({color:cols[n], shininess:50})); 
+                    window.robot.nds[n].mesh.add(m); robotMeshObjects.push(m); 
+                    checkLoadComplete();
+                } else {
+                    fetch('meshes/' + encodeURIComponent(n)).then(r => {
+                        if(!r.ok && r.status !== 0) throw new Error(`HTTP Error ${r.status}`);
+                        return r.arrayBuffer();
+                    }).then(b => {
+                        let m = new THREE.Mesh(parser.parse(b), new THREE.MeshPhongMaterial({color:cols[n], shininess:50})); 
+                        window.robot.nds[n].mesh.add(m); robotMeshObjects.push(m); 
+                        checkLoadComplete();
+                    }).catch(err => { throw err; });
+                }
+            } catch(e) {
+                let ld = document.getElementById('loading');
+                if (ld) {
+                    ld.style.display = 'block';
+                    ld.style.backgroundColor = '#fdedec';
+                    ld.style.border = '2px solid #e74c3c';
+                    ld.innerHTML = `
+                        <div style="color: #c0392b; font-size: 14px; text-align: left;">
+                            <b>❌ โหลดโมเดล 3D ไม่สำเร็จ!</b><br>
+                            <span style="font-size: 12px;">สาเหตุ: ${e.message}</span>
+                            <hr style="border-color:#e74c3c; margin: 10px 0;">
+                            <b>วิธีแก้:</b><br>
+                            ตรวจสอบว่ามีไฟล์ ${n} อยู่ในโฟลเดอร์ meshes หรือไม่?<br>
+                        </div>
+                    `;
+                }
+
+                let boxGeo = new THREE.BoxGeometry(40, 40, 80);
+                boxGeo.translate(0, 0, 40); 
+                let boxMat = new THREE.MeshBasicMaterial({color: 0xe74c3c, wireframe: true});
+                let dummyMesh = new THREE.Mesh(boxGeo, boxMat);
+                window.robot.nds[n].mesh.add(dummyMesh); 
+                robotMeshObjects.push(dummyMesh);
+                checkLoadComplete();
+            }
+        });
+
+        const tcpPos = new THREE.Vector3();
+        window.updateTCP = function() {
+            if(!window.robot) return; 
+            window.robot.root.updateMatrixWorld(true); window.robot.joints[5].getWorldPosition(tcpPos);
+            let td = document.getElementById('tcp-display'); if(td) td.innerText = `TCP X:${Math.round(tcpPos.x)} | Y:${Math.round(tcpPos.y)} | Z:${Math.round(tcpPos.z)}`;
+        }
+
+        const arduinoMaxSpeed = 3000; const stepsPerDegree = (200 * 16 * 6.0) / 360.0; const radPerSec = (arduinoMaxSpeed / stepsPerDegree) * (Math.PI / 180); 
+        let lastTime = performance.now(); 
+
+        function loop(time) {
+            requestAnimationFrame(loop); let dt = (time - lastTime) / 1000.0; lastTime = time; if(dt > 0.1) dt = 0.016; 
+            if(controls) controls.update(); 
+            if(window.robot) {
+                let isMoving3D = false; let maxSpeedThisFrame = radPerSec * dt; 
+                let isConnected = (window.robotLink && window.robotLink.serialWriter !== null);
+                if (!isConnected) {
+                    let maxDiff = 0; let diffs = [0, 0, 0, 0, 0, 0];
+                    for(let i = 0; i < 6; i++) {
+                        let targetRad = (uiGraphTargets[i] + visualOffsets[i]) * Math.PI / 180; let currentRad = window.robot.joints[i].rotation.z; diffs[i] = targetRad - currentRad;
+                        if(Math.abs(diffs[i]) > maxDiff) { maxDiff = Math.abs(diffs[i]); }
+                    }
+                    if (maxDiff > 0.001) {
+                        let speedMultiplier = 0.5 + (globalSpeed / 100) * 1.5; let maxStepThisFrame = speedMultiplier * dt;
+                        let ratio = (maxStepThisFrame < maxDiff) ? (maxStepThisFrame / maxDiff) : 1.0;
+                        for(let i = 0; i < 6; i++) { window.robot.joints[i].rotation.z += diffs[i] * ratio; }
+                        isMoving3D = true;
+                    }
+                }
+                if((isMoving3D || isConnected) && window.updateTCP) window.updateTCP();
+            }
+
+            renderer.clear(); renderer.setViewport(0,0,c3D.clientWidth,c3D.clientHeight); renderer.setScissorTest(false); renderer.render(scene, camera);
+            if (typeof axCam !== 'undefined' && typeof axScene !== 'undefined') {
+                axCam.position.copy(camera.position).sub(controls.target).setLength(5.5); axCam.lookAt(axScene.position);
+                renderer.setViewport(c3D.clientWidth-140, 20, 120, 120); renderer.setScissor(c3D.clientWidth-140, 20, 120, 120); renderer.setScissorTest(true);
+                renderer.clearDepth(); renderer.render(axScene, axCam);
+            }
+        }
+        
+        requestAnimationFrame((time) => { lastTime = time; loop(time); });
+        window.addEventListener('resize', () => { camera.aspect = c3D.clientWidth/c3D.clientHeight; camera.updateProjectionMatrix(); renderer.setSize(c3D.clientWidth, c3D.clientHeight); });
+        setInterval(()=>document.getElementById('clock').innerText=new Date().toLocaleTimeString('en-US',{hour12:false}), 1000);
+
+        window.addEventListener('load', () => {
+            try {
+                let saved = localStorage.getItem('ar4_autosave_blocks');
+                if(saved) { commandsData = JSON.parse(saved); renderBlocks(); }
+            } catch(e) {}
+        });
+
+    </script>
+</body>
+</html>
