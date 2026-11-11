@@ -21,8 +21,11 @@
       "shortcutName": "Robot Arm Controller"
     },
     "files": [
-      "**/*",
-      "!node_modules/*"
+      "index.html",
+      "main.js",
+      "package.json",
+      "assets/**/*",
+      "meshes/**/*"
     ],
     "extraFiles": [
       {
