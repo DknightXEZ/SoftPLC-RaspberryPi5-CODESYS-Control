@@ -39,7 +39,7 @@
     "productName": "Robot Arm Controller",
     "directories": {
       "buildResources": "build",
-      "output": "dist"
+      "output": "release"
     }
   },
   "devDependencies": {

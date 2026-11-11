@@ -159,7 +159,7 @@ SoftPLC-RaspberryPi5-CODESYS-Control/
 cd RobotArmController
 npm install        # ติดตั้ง Electron (ครั้งแรกครั้งเดียว)
 npm start          # เปิดโปรแกรม  (หรือดับเบิลคลิก RobotControlAPP.bat)
-npm run build      # สร้างไฟล์ติดตั้ง .exe ไว้ในโฟลเดอร์ dist/
+npm run build      # สร้างไฟล์ติดตั้ง .exe ไว้ในโฟลเดอร์ release/
 ```
 
 > [!NOTE]
