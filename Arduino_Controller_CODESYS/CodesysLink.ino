@@ -235,7 +235,7 @@ static uint16_t cdsExecute(uint16_t code) {
     for (uint8_t i = 0; i < 6; i++) {         // ตรวจให้ครบทุกแกนก่อน ถ้าผิดแม้แกนเดียวไม่ขยับเลย
       if ((mask & (1U << i)) == 0) continue;
       int16_t d10 = (int16_t)cdsReg[CDS_REG_TARGET + i];
-      if (d10 < (int16_t)(minAngle * 10) || d10 > (int16_t)(maxAngle * 10)) return CDS_RES_RANGE;
+      if (d10 < (int16_t)(jointMinDeg[i] * 10) || d10 > (int16_t)(jointMaxDeg[i] * 10)) return CDS_RES_RANGE;   // ขอบเขตรายแกน
       if (isFree[i]) return CDS_RES_AXIS_FREE;
     }
     long mappedSpeed = map((long)spd, 1, 100, 100, 3000);     // สูตรเดียวกับคำสั่ง S
