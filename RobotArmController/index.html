@@ -9,6 +9,118 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        // [แก้ช่องพิมพ์ค้าง] alert() ของระบบใน Electron บน Windows ทำให้ช่องพิมพ์รับคีย์บอร์ดไม่ได้หลังปิดกล่อง
+        //    จึงแทนด้วยกล่องข้อความในหน้าเว็บ (ไม่บล็อกโปรแกรม) ข้อความเหมือนเดิมทุกจุด
+        // [แจ้งเตือนพร้อมเสียง] กล่องเด้งมีสีตามระดับ และมีเสียงเตือนเมื่อเป็นสิ่งที่ทำไม่ได้หรือห้ามทำ
+        //    window.uiNotify(ข้อความ, 'error' | 'warn' | 'ok' | 'info')   error/warn มีเสียง, ok/info ไม่มีเสียง
+        //    window.notifyBlocked(ข้อความ)  = แจ้งว่าทำไม่ได้ (error + เสียง)
+        //    alert() เดิมทุกจุดจะเลือกระดับให้เองจากข้อความ
+        (function () {
+            const LEVELS = {
+                error: { title: 'ทำรายการนี้ไม่ได้', color: '#e74c3c', sound: true },
+                warn:  { title: 'แจ้งเตือน',        color: '#f39c12', sound: true },
+                ok:    { title: 'สำเร็จ',            color: '#27ae60', sound: false },
+                info:  { title: 'ข้อมูล',            color: '#2980b9', sound: false }
+            };
+            let audioCtx = null;
+            function beep(level) {
+                try {
+                    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    if (audioCtx.state === 'suspended') audioCtx.resume();
+                    const tones = level === 'error' ? [[880, 0], [587, 0.17]] : [[740, 0]];
+                    tones.forEach(([f, t0]) => {
+                        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                        const t = audioCtx.currentTime + t0;
+                        o.type = 'square'; o.frequency.value = f;
+                        g.gain.setValueAtTime(0.0001, t);
+                        g.gain.exponentialRampToValueAtTime(0.12, t + 0.01);
+                        g.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+                        o.connect(g); g.connect(audioCtx.destination);
+                        o.start(t); o.stop(t + 0.16);
+                    });
+                } catch (e) {}
+            }
+            function guessLevel(msg) {
+                const s = String(msg);
+                if (/ไม่สำเร็จ|ผิดพลาด|ไม่รองรับ|ไม่ถูกต้อง|ปฏิเสธ|ชน|เกินขอบเขต|หยุดคำสั่ง|ห้าม|ล้มเหลว|ทำไม่ได้/.test(s)) return 'error';
+                if (/สำเร็จ|เรียบร้อย|ตัดการเชื่อมต่อแล้ว|ส่งคำสั่ง/.test(s)) return 'ok';
+                return 'warn';
+            }
+            let lastMsg = '', lastTime = 0;
+            function showMsg(msg, level) {
+                const lv = LEVELS[level] || LEVELS.warn;
+                const now = Date.now();
+                let box = document.getElementById('app-msg-box');
+                const visible = box && box.style.display !== 'none';
+                // ข้อความเดิมซ้ำภายใน 1.5 วินาที (เช่น กดปุ่ม Jog ค้าง) ไม่ต้องเด้ง/ส่งเสียงซ้ำ
+                if (visible && String(msg) === lastMsg && now - lastTime < 1500) { lastTime = now; return; }
+                lastMsg = String(msg); lastTime = now;
+                if (!box) {
+                    const st = document.createElement('style');
+                    st.textContent = '@keyframes appMsgPop{from{transform:scale(.85);opacity:0}to{transform:scale(1);opacity:1}}' +
+                                     '@keyframes appMsgShake{0%,100%{transform:translateX(0)}20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}';
+                    document.head.appendChild(st);
+                    box = document.createElement('div'); box.id = 'app-msg-box';
+                    box.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;z-index:99999;';
+                    box.innerHTML = '<div id="app-msg-card" style="background:#fff;border-radius:8px;max-width:440px;min-width:300px;box-shadow:0 8px 24px rgba(0,0,0,0.3);font-size:13px;color:#2c3e50;overflow:hidden;">' +
+                        '<div id="app-msg-title" style="padding:9px 18px;color:#fff;font-weight:bold;font-size:13px;"></div>' +
+                        '<div id="app-msg-text" style="white-space:pre-wrap;padding:14px 18px 12px 18px;"></div>' +
+                        '<div style="text-align:right;padding:0 18px 14px 18px;"><button id="app-msg-ok" style="padding:6px 18px;border:none;border-radius:4px;background:#2980b9;color:#fff;font-weight:bold;cursor:pointer;">ตกลง</button></div></div>';
+                    document.body.appendChild(box);
+                    const close = () => { box.style.display = 'none'; };
+                    box.querySelector('#app-msg-ok').onclick = close;
+                    box.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === 'Escape') close(); });
+                }
+                const card = box.querySelector('#app-msg-card');
+                const title = box.querySelector('#app-msg-title');
+                title.textContent = lv.title; title.style.background = lv.color;
+                box.querySelector('#app-msg-ok').style.background = lv.color;
+                box.querySelector('#app-msg-text').textContent = String(msg);
+                box.style.display = 'flex';
+                card.style.animation = 'none'; void card.offsetWidth;
+                card.style.animation = level === 'error' ? 'appMsgPop .15s ease-out, appMsgShake .35s ease-in-out .15s' : 'appMsgPop .15s ease-out';
+                box.querySelector('#app-msg-ok').focus();
+                if (lv.sound) beep(level);
+            }
+            window.uiNotify = function (msg, level) {
+                if (document.body) showMsg(msg, level); else document.addEventListener('DOMContentLoaded', () => showMsg(msg, level));
+            };
+            window.notifyBlocked = function (msg) { window.uiNotify(msg, 'error'); };
+            window.alert = function (msg) { window.uiNotify(msg, guessLevel(msg)); };
+
+            // กดปุ่ม/ช่องที่ถูกปิดใช้งาน (disabled) -> แจ้งเหตุผลพร้อมเสียง
+            function blockedReason(el) {
+                try {
+                    if (cdsOwnsArm) return "CODESYS เป็นผู้ควบคุมแขนอยู่ หน้านี้ดูได้อย่างเดียว\nกด 'ขอสิทธิ์ให้หน้านี้' ก่อนจึงจะสั่งได้";
+                } catch (e) {}
+                try {
+                    if (isProgramRunning) return 'โปรแกรมกำลังทำงานอยู่ กด Stop Program ก่อนจึงจะใช้ส่วนนี้ได้';
+                } catch (e) {}
+                try {
+                    let ax = -1;
+                    const m = (el.id || '').match(/^(joint|target)(\d)$/);
+                    if (m) ax = Number(m[2]) - 1;
+                    else if (el.classList && el.classList.contains('jog-btn')) {
+                        const sl = el.parentElement && el.parentElement.querySelector('input[type="range"][id^="joint"]');
+                        if (sl) ax = Number(sl.id.replace('joint', '')) - 1;
+                    }
+                    if (ax >= 0 && freedriveModes[ax]) return 'แกน J' + (ax + 1) + ' ปลดล็อก (Free) อยู่ ล็อกแกนก่อนจึงจะสั่งด้วยโปรแกรมได้';
+                } catch (e) {}
+                if (el.id === 'btn-set-home') return 'กำลังรอ Arduino บันทึกค่า Home อยู่';
+                return 'ส่วนนี้ใช้งานไม่ได้ในขณะนี้';
+            }
+            function onPress(e) {
+                const t = e.target;
+                if (!t || !t.closest) return;
+                let dis = t.closest('button:disabled, input:disabled, select:disabled, textarea:disabled');
+                if (!dis) { const lb = t.closest('label'); if (lb) dis = lb.querySelector('input:disabled'); }
+                if (dis) window.notifyBlocked(blockedReason(dis));
+            }
+            document.addEventListener('pointerdown', onPress, true);
+            document.addEventListener('mousedown', onPress, true);
+        })();
+    </script>
 
     <style>
         :root { --primary: #3498db; --primary-dark: #2980b9; --bg-dark: #1e2836; --bg-sidebar: #2c3e50; --bg-light: #f4f6f9; --panel-bg: #ffffff; --text-main: #333333; --text-muted: #7f8c8d; --border: #e0e6ed; --accent-green: #2ecc71; --accent-red: #e74c3c; --accent-yellow: #f39c12; }
@@ -61,7 +173,7 @@
         .tcp-readout { background: #e8f4f8; color: var(--primary-dark); padding: 4px 10px; border-radius: 4px; font-family: monospace; font-weight: bold; font-size: 11px;}
         .chart-wrapper { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 10px; height: 220px; min-height: 220px; }
 
-        /* 🟢 สไตล์ปุ่มสวิตช์ Toggle Master */
+        /* สไตล์ปุ่มสวิตช์ Toggle Master */
         .switch { position: relative; display: inline-block; width: 34px; height: 20px; margin-left: 5px; }
         .switch input { opacity: 0; width: 0; height: 0; }
         .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 20px; }
@@ -69,13 +181,20 @@
         input:checked + .slider { background-color: var(--accent-yellow); }
         input:checked + .slider:before { transform: translateX(14px); }
 
-        /* 🟢 สไตล์ปุ่มสวิตช์ย่อย (Mini Toggle) สำหรับแต่ละแกน */
+        /* สไตล์ปุ่มสวิตช์ย่อย (Mini Toggle) สำหรับแต่ละแกน */
         .switch-mini { position: relative; display: inline-block; width: 28px; height: 16px; margin-left: 5px; vertical-align: middle; }
         .switch-mini input { opacity: 0; width: 0; height: 0; }
         .slider-mini { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #e0e6ed; border: 1px solid #b0b8c1; transition: .3s; border-radius: 16px; }
         .slider-mini:before { position: absolute; content: ""; height: 10px; width: 10px; left: 2px; bottom: 2px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
         input:checked + .slider-mini { background-color: var(--accent-yellow); border-color: #d4ac0d; }
         input:checked + .slider-mini:before { transform: translateX(12px); }
+        .i2c-line { font-size: 10px; color: #555; margin-bottom: 3px; }
+        .i2c-table { width: 100%; border-collapse: collapse; font-size: 10px; margin: 5px 0 4px 0; }
+        .i2c-table th { text-align: left; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--border); padding: 3px 2px; }
+        .i2c-table td { border-bottom: 1px solid #eef1f4; padding: 3px 2px; }
+        .i2c-ok { color: #1e8449; font-weight: bold; } .i2c-warn { color: #b9770e; font-weight: bold; } .i2c-err { color: #c0392b; font-weight: bold; } .i2c-na { color: #95a5a6; } .i2c-chg { color: var(--primary); font-weight: bold; }
+        .i2c-badge { font-size: 10px; font-weight: bold; padding: 2px 8px; border-radius: 10px; background: #ecf0f1; color: #7f8c8d; }
+        .i2c-badge.ok { background: #d5f5e3; color: #1e8449; } .i2c-badge.warn { background: #fdebd0; color: #b9770e; } .i2c-badge.err { background: #fadbd8; color: #c0392b; }
         .free-label { font-size: 9px; color: var(--text-muted); margin-left: 3px; font-weight: normal; vertical-align: middle; }
     </style>
 </head>
@@ -86,7 +205,7 @@
         <div class="top-tabs">
             <button class="tab-btn active" onclick="switchTab('tab-main')">Main & Hardware</button>
             <button class="tab-btn" onclick="switchTab('tab-program')">Program Studio</button>
-            <button class="tab-btn" onclick="switchTab('tab-analytics')">📈 Analytics</button>
+            <button class="tab-btn" onclick="switchTab('tab-analytics')">Analytics</button>
         </div>
     </header>
 
@@ -99,22 +218,45 @@
                         <select id="com-port-select" style="flex: 1; padding: 6px; border: 1px solid var(--border); border-radius: 4px; font-size: 11px;">
                             <option value="">-- กด Scan เพื่อค้นหา --</option>
                         </select>
-                        <button class="btn-dark" onclick="window.robotLink.scanPorts()" style="padding: 6px 10px; font-size: 11px; color: white; border: none; border-radius: 4px; cursor: pointer;">🔍 Scan</button>
+                        <button class="btn-dark" onclick="window.robotLink.scanPorts()" style="padding: 6px 10px; font-size: 11px; color: white; border: none; border-radius: 4px; cursor: pointer;">Scan</button>
                     </div>
                     <div style="display: flex; gap: 5px;">
-                        <button class="btn-action btn-success" style="margin:0; flex:1;" onclick="window.robotLink.connect()">🔌 Connect Arduino</button>
-                        <button id="btn-disconnect" class="btn-action btn-danger" style="margin:0; flex:1;" onclick="window.robotLink.disconnect()">⛔ Disconnect</button>
+                        <button class="btn-action btn-success" style="margin:0; flex:1;" onclick="window.robotLink.connect()">Connect Arduino</button>
+                        <button id="btn-disconnect" class="btn-action btn-danger" style="margin:0; flex:1;" onclick="window.robotLink.disconnect()">Disconnect</button>
                     </div>
                 </div>
 
-                <!-- 🔵 [CODESYS] ผู้ควบคุมแขน: หน้านี้ (PC) หรือ CODESYS -->
+                <!-- [I2C] สถานะการเชื่อมต่อ I2C: MUX TCA9548A และเซ็นเซอร์ AS5600 ของแต่ละแกน (คำสั่ง I2C ของ Arduino) -->
+                <div class="control-group" style="border-left: 4px solid #16a085;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                        <h4 style="margin:0; border:none; padding:0;">I2C Sensor Bus</h4>
+                        <span id="i2c-badge" class="i2c-badge">ยังไม่ได้เชื่อมต่อ</span>
+                    </div>
+                    <div id="i2c-bus" class="i2c-line">MUX TCA9548A (0x70): -</div>
+                    <div id="i2c-ports" class="i2c-line">พอร์ต MUX ที่พบ AS5600 (0x36): -</div>
+                    <div id="i2c-portang" class="i2c-line"></div>
+                    <table class="i2c-table">
+                        <thead><tr><th>แกน</th><th>พอร์ต</th><th>การเชื่อมต่อ</th><th>แม่เหล็ก</th><th>AGC</th><th>มุมเซ็นเซอร์</th></tr></thead>
+                        <tbody id="i2c-rows"></tbody>
+                    </table>
+                    <div id="i2c-note" class="i2c-line" style="min-height: 14px; white-space: pre-line;"></div>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <button class="btn-action btn-primary" style="margin:0; flex:1; background:#16a085;" onclick="window.i2cCheck(false)">ตรวจ I2C</button>
+                        <label style="font-size: 10px; color: #555; display: flex; align-items: center; gap: 3px; cursor: pointer;"><input type="checkbox" id="i2c-auto" onchange="window.i2cSetAuto(this.checked)"> อัปเดตทุก 2 วินาที</label>
+                    </div>
+                    <div id="i2c-time" style="font-size: 9px; color: var(--text-muted); margin-top: 4px;"></div>
+                    <button id="i2c-map-btn" class="btn-action btn-dark" style="margin: 8px 0 0 0;" onclick="window.i2cMapTest()" title="สั่งแกน J1-J5 ทีละนิดแล้วดูว่าเซ็นเซอร์พอร์ตไหนหมุนตาม">ค้นหาพอร์ตและทิศเซ็นเซอร์ (แขนขยับเล็กน้อย)</button>
+                    <div id="i2c-map" class="i2c-line" style="margin-top: 4px;"></div>
+                </div>
+
+                <!-- [CODESYS] ผู้ควบคุมแขน: หน้านี้ (PC) หรือ CODESYS -->
                 <div class="control-group" style="border-left: 4px solid var(--primary);">
                     <h4>Control Owner</h4>
                     <div id="owner-status" style="font-size: 11px; font-weight: bold; color: var(--text-muted); margin-bottom: 4px;">ผู้ควบคุม: ยังไม่ทราบ (ยังไม่ได้เชื่อมต่อ)</div>
                     <div id="owner-note" style="font-size: 10px; color: var(--text-muted); min-height: 14px; margin-bottom: 6px;"></div>
                     <div style="display: flex; gap: 5px;">
-                        <button id="owner-take-btn" class="btn-action btn-primary" style="margin:0; flex:1;" onclick="requestArmControl()">🖥️ ขอสิทธิ์ให้หน้านี้</button>
-                        <button id="owner-give-btn" class="btn-action btn-dark" style="margin:0; flex:1;" onclick="giveArmControlToCodesys()">🤖 ส่งสิทธิ์ให้ CODESYS</button>
+                        <button id="owner-take-btn" class="btn-action btn-primary" style="margin:0; flex:1;" onclick="requestArmControl()">ขอสิทธิ์ให้หน้านี้</button>
+                        <button id="owner-give-btn" class="btn-action btn-dark" style="margin:0; flex:1;" onclick="giveArmControlToCodesys()">ส่งสิทธิ์ให้ CODESYS</button>
                     </div>
                 </div>
 
@@ -124,7 +266,7 @@
                         <div style="font-size: 11px; color: #555;">Step: <input type="text" id="jog-step" value="1" style="width: 42px; text-align: center; border: 1px solid var(--border); border-radius: 3px;"> °</div>
                     </div>
 
-                    <!-- 🟢 เพิ่ม Mini Toggle แยกสำหรับแต่ละแกน -->
+                    <!-- เพิ่ม Mini Toggle แยกสำหรับแต่ละแกน -->
                     <div class="slider-row">
                         <label>J1 (Base) 
                             <span style="display:flex; align-items:center;">
@@ -191,7 +333,7 @@
                     </div>
                 </div>
 
-                <!-- 🟢 ส่วน Master Teach Mode (ปลดล็อคพร้อมกันทุกแกน) -->
+                <!-- ส่วน Master Teach Mode (ปลดล็อคพร้อมกันทุกแกน) -->
                 <div class="control-group" style="border-left: 4px solid var(--accent-yellow);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
                         <h4 style="margin:0; border:none; padding:0;">Master Teach Mode</h4>
@@ -203,21 +345,21 @@
                             </label>
                         </div>
                     </div>
-                    <div id="teach-status" style="font-size: 10px; color: var(--text-muted); margin-bottom: 8px;">🔴 สถานะ: ควบคุมด้วยโปรแกรม</div>
-                    <button class="btn-action btn-success" onclick="saveWaypoint()" style="margin: 0; background: var(--accent-yellow); color: #333;">📸 บันทึกตำแหน่งปัจจุบัน (Save Waypoint)</button>
+                    <div id="teach-status" style="font-size: 10px; color: var(--text-muted); margin-bottom: 8px;">สถานะ: ควบคุมด้วยโปรแกรม</div>
+                    <button class="btn-action btn-success" onclick="saveWaypoint()" style="margin: 0; background: var(--accent-yellow); color: #333;">บันทึกตำแหน่งปัจจุบัน (Save Waypoint)</button>
                 </div>
                 
                 <div class="control-group">
                     <h4>Home & Memory Setup</h4>
                     <button id="btn-go-home" class="btn-action btn-dark" onclick="goHome()">Move to Home</button>
                     <button id="btn-set-home" class="btn-action btn-primary" onclick="setCurrentAsHome()">Set Current as Home</button>
-                    <button class="btn-action btn-dark" style="background:#8e44ad; margin-top:5px;" onclick="saveToEEPROM()">💾 Save Position to Memory (EEPROM)</button>
+                    <button class="btn-action btn-dark" style="background:#8e44ad; margin-top:5px;" onclick="saveToEEPROM()">Save Position to Memory (EEPROM)</button>
                 </div>
                 <script>
                     function saveToEEPROM() {
                         if(window.robotLink && window.robotLink.serialWriter) {
                             window.robotLink.serialWriter.write("SAVE\n").catch(()=>{});
-                            alert("ส่งคำสั่งบันทึกตำแหน่ง (SAVE) ไปยัง Arduino แล้ว");
+                            window.uiNotify("ส่งคำสั่งบันทึกตำแหน่ง (SAVE) ไปยัง Arduino แล้ว\n(ระบบบันทึกตำแหน่งให้เองทุกครั้งที่แขนหยุดนิ่ง 1 วินาทีอยู่แล้ว)", 'ok');
                         } else {
                             alert("กรุณาเชื่อมต่อพอร์ตก่อนครับ");
                         }
@@ -232,8 +374,8 @@
                 <div class="control-group">
                     <h4>Program Editor</h4>
                     <div class="editor-mode-selector">
-                        <button id="btn-mode-block" class="mode-sub-btn active" onclick="switchEditorMode('block')">🧩 Visual Blocks</button>
-                        <button id="btn-mode-code" class="mode-sub-btn" onclick="switchEditorMode('code')">📝 Text Script</button>
+                        <button id="btn-mode-block" class="mode-sub-btn active" onclick="switchEditorMode('block')">Visual Blocks</button>
+                        <button id="btn-mode-code" class="mode-sub-btn" onclick="switchEditorMode('code')">Text Script</button>
                     </div>
                 </div>
                 <div id="area-block-workspace">
@@ -255,17 +397,17 @@
                 
                 <div id="area-code-workspace" style="display: none;">
                     <div class="control-group"><textarea id="code-text-area" class="code-textarea" placeholder="// สคริปต์ข้อความ..."></textarea></div>
-                    <button class="btn-action btn-dark" onclick="compileCodeToBlocks()" style="margin-bottom: 10px;">🔄 Sync to Blocks</button>
+                    <button class="btn-action btn-dark" onclick="compileCodeToBlocks()" style="margin-bottom: 10px;">Sync to Blocks</button>
                 </div>
                 
                 <div class="control-group">
-                    <button id="main-play-btn" class="btn-action btn-success" onclick="toggleProgram()">▶️ Run Full Program</button>
+                    <button id="main-play-btn" class="btn-action btn-success" onclick="toggleProgram()">Run Full Program</button>
                     <div style="display: flex; gap: 5px; margin-bottom: 5px;">
-                        <button class="btn-action btn-primary" onclick="exportProgramFile()" style="margin:0; flex:1;">💾 Save File</button>
-                        <button class="btn-action btn-dark" onclick="document.getElementById('import-file').click()" style="margin:0; flex:1;">📂 Load File</button>
+                        <button class="btn-action btn-primary" onclick="exportProgramFile()" style="margin:0; flex:1;">Save File</button>
+                        <button class="btn-action btn-dark" onclick="document.getElementById('import-file').click()" style="margin:0; flex:1;">Load File</button>
                         <input type="file" id="import-file" style="display:none;" accept=".json" onchange="importProgramFile(event)">
                     </div>
-                    <button class="btn-action btn-danger" onclick="clearProgramWorkspace()" style="margin-bottom:0;">🗑️ Clear Program</button>
+                    <button class="btn-action btn-danger" onclick="clearProgramWorkspace()" style="margin-bottom:0;">Clear Program</button>
                 </div>
             </div>
 
@@ -290,14 +432,15 @@
 
                 <div class="control-group" style="position: sticky; bottom: 0; background: var(--panel-bg); z-index: 10;">
                     <div style="display: flex; gap: 5px;">
-                        <button class="btn-action btn-primary" onclick="startTelemetry()" style="margin: 0; flex: 1;">🔴 REC Manual</button>
-                        <button class="btn-action btn-dark" onclick="stopTelemetry()" style="margin: 0; flex: 1;">⏹️ STOP</button>
+                        <button class="btn-action btn-primary" onclick="startTelemetry()" style="margin: 0; flex: 1;">REC Manual</button>
+                        <button class="btn-action btn-dark" onclick="stopTelemetry()" style="margin: 0; flex: 1;">STOP</button>
                     </div>
                     <div style="display: flex; gap: 5px; margin-top: 5px;">
-                        <button class="btn-action btn-danger" style="margin: 0; flex: 1;" onclick="clearTelemetry()">🗑️ Clear</button>
-                        <button class="btn-action btn-success" onclick="exportInteractiveHTML()" style="margin: 0; flex: 1.5; background: #27ae60;">🌐 Save Interactive</button>
-                        <button class="btn-action btn-success" onclick="exportCSV()" style="margin: 0; flex: 1.5; background: #27ae60;">📊 Export CSV</button>
+                        <button class="btn-action btn-danger" style="margin: 0; flex: 1;" onclick="clearTelemetry()">Clear</button>
+                        <button class="btn-action btn-success" onclick="exportInteractiveHTML()" style="margin: 0; flex: 1.5; background: #27ae60;">Save Interactive</button>
+                        <button class="btn-action btn-success" onclick="exportCSV()" style="margin: 0; flex: 1.5; background: #27ae60;">Export CSV</button>
                     </div>
+                    <div id="sen-health" style="font-size: 11px; color: #c0392b; white-space: pre-line; margin-top: 5px;"></div>
                 </div>
             </div>
         </aside>
@@ -326,7 +469,14 @@
         <div>
             <span class="status-dot" id="ros-dot"></span> 
             <span id="ros-status">WAITING FOR ARDUINO...</span>
-            <span id="speed-display" style="margin-left: 15px; color: var(--accent-green); font-weight: bold;">⚡ Speed: 50%</span>
+            <span id="speed-display" style="margin-left: 15px; color: var(--accent-green); font-weight: bold;">Speed: 50%</span>
+            <!-- [ปุ่มปรับ Speed] ความเร็วเริ่มต้น 1-100% ใช้กับการขยับด้วยมือ และเป็นค่าเริ่มของโปรแกรม (บล็อก Speed ในโปรแกรมยังเปลี่ยนค่าระหว่างรันได้) -->
+            <span id="speed-control" style="margin-left: 8px; display: inline-flex; align-items: center; gap: 4px;" title="ความเร็วเริ่มต้น (1-100%) ส่งให้ Arduino ทันที">
+                <button type="button" onclick="window.nudgeDefaultSpeed(-5)" style="padding:0 6px; font-weight:bold; cursor:pointer;">−</button>
+                <input type="range" id="speed-slider" min="1" max="100" step="1" value="50" style="width: 110px; vertical-align: middle;">
+                <button type="button" onclick="window.nudgeDefaultSpeed(5)" style="padding:0 6px; font-weight:bold; cursor:pointer;">+</button>
+                <input type="number" id="speed-input" min="1" max="100" step="1" value="50" style="width: 46px; text-align: center; font-weight: bold;"> %
+            </span>
             <span id="loop-display" style="margin-left: 15px; color: var(--accent-yellow); font-weight: bold; letter-spacing: 0.5px;"></span>
         </div>
         <div><span><span id="clock">00:00:00</span></span></div>
@@ -344,10 +494,13 @@
         ];
 
         let jointTargets = [0, 0, 0, 0, 0, 0]; 
+        // มุมข้อต่อเก็บละเอียด 0.01 องศา (เดิมปัดเป็นองศาเต็ม ทำให้ท่าที่สอนด้วยมือหรือบันทึกลงบล็อกคลาดได้ถึง 0.5 องศา/แกน)
+        function r2(v) { const x = Math.round(Number(v) * 100) / 100; return Object.is(x, -0) ? 0 : x; }
+        function fmtDeg(v) { return String(r2(v)); }
         let uiGraphTargets = [0, 0, 0, 0, 0, 0]; 
-        let freedriveModes = [false, false, false, false, false, false]; // 🟢 เก็บสถานะ Free แยกแกน
+        let freedriveModes = [false, false, false, false, false, false]; // เก็บสถานะ Free แยกแกน
 
-        // 🔵 [CODESYS] ผู้ควบคุมแขน: false = หน้านี้ (PC), true = CODESYS
+        // [CODESYS] ผู้ควบคุมแขน: false = หน้านี้ (PC), true = CODESYS
         // Arduino ส่งบรรทัด OWNER:PC หรือ OWNER:CDS มาบอกทุกครั้งที่เปลี่ยน (ตามด้วย BUSY / BLOCKED / WD ถ้ามีเหตุผล)
         let cdsOwnsArm = false;
 
@@ -373,7 +526,7 @@
             if (cdsOwnsArm && !wasCds && isProgramRunning) window.toggleProgram();   // หยุดโปรแกรมของหน้านี้ที่กำลังรันอยู่
 
             let st = document.getElementById('owner-status');
-            st.innerText = cdsOwnsArm ? '🤖 ผู้ควบคุม: CODESYS (หน้านี้ดูได้อย่างเดียว)' : '🖥️ ผู้ควบคุม: หน้านี้ (PC)';
+            st.innerText = cdsOwnsArm ? 'ผู้ควบคุม: CODESYS (หน้านี้ดูได้อย่างเดียว)' : 'ผู้ควบคุม: หน้านี้ (PC)';
             st.style.color = cdsOwnsArm ? 'var(--accent-red)' : 'var(--accent-green)';
             const notes = {
                 BUSY: 'แขนยังเคลื่อนที่อยู่ จึงยังสลับสิทธิ์ไม่ได้ รอให้หยุดก่อนแล้วกดใหม่',
@@ -382,31 +535,66 @@
             };
             document.getElementById('owner-note').innerText = notes[why] || '';
             window.setArmOwnerLock(cdsOwnsArm);
+            // คำสั่งที่ส่งอัตโนมัติตอนเพิ่งเชื่อมต่อ (LOCK_ALL, ความเร็ว) อาจโดนปฏิเสธ จึงไม่เด้งเตือนใน 5 วินาทีแรก
+            if ((why === 'BLOCKED' || why === 'BUSY') && window.robotLink && Date.now() - (window.robotLink.connectedAt || 0) > 5000) {
+                window.notifyBlocked(notes[why]);
+            }
         };
 
         window.requestArmControl = function() {
-            if(!window.robotLink || !window.robotLink.serialWriter) return alert("⚠️ กรุณาเชื่อมต่อ Arduino ก่อนครับ");
+            if(!window.robotLink || !window.robotLink.serialWriter) return alert("กรุณาเชื่อมต่อ Arduino ก่อนครับ");
             window.robotLink.serialWriter.write("REQ\n").catch(()=>{});
         };
 
         window.giveArmControlToCodesys = function() {
-            if(!window.robotLink || !window.robotLink.serialWriter) return alert("⚠️ กรุณาเชื่อมต่อ Arduino ก่อนครับ");
-            if(isProgramRunning) return alert("⚠️ กรุณาหยุดโปรแกรมของหน้านี้ก่อนส่งสิทธิ์ครับ");
+            if(!window.robotLink || !window.robotLink.serialWriter) return alert("กรุณาเชื่อมต่อ Arduino ก่อนครับ");
+            if(isProgramRunning) return alert("กรุณาหยุดโปรแกรมของหน้านี้ก่อนส่งสิทธิ์ครับ");
             window.robotLink.serialWriter.write("REL\n").catch(()=>{});
         };
 
         let commandsData = [];
         let isProgramRunning = false;
         let globalSpeed = 50;
+        // [ปุ่มปรับ Speed] ค่าความเร็วเริ่มต้นที่ผู้ใช้ตั้ง (จำค่าไว้ใช้ครั้งต่อไป)
+        let defaultSpeed = 50;
+        try { const sv = parseInt(localStorage.getItem('robotDefaultSpeed')); if (sv >= 1 && sv <= 100) defaultSpeed = sv; } catch (e) {}
+        globalSpeed = defaultSpeed;
+        function sendSpeedToArduino(v) {
+            if (window.robotLink && window.robotLink.serialWriter && !cdsOwnsArm) {
+                window.robotLink.serialWriter.write(`S${v}\n`).catch(() => {});
+            }
+        }
+        window.setDefaultSpeed = function (v) {
+            v = Math.max(1, Math.min(100, Math.round(parseFloat(v) || defaultSpeed)));
+            defaultSpeed = v;
+            try { localStorage.setItem('robotDefaultSpeed', String(v)); } catch (e) {}
+            const sl = document.getElementById('speed-slider'), ip = document.getElementById('speed-input');
+            if (sl) sl.value = v; if (ip) ip.value = v;
+            if (!isProgramRunning) {
+                globalSpeed = v;
+                const d = document.getElementById('speed-display'); if (d) d.innerText = `Speed: ${v}%`;
+                sendSpeedToArduino(v);
+            }
+        };
+        window.nudgeDefaultSpeed = function (dv) { window.setDefaultSpeed(defaultSpeed + dv); };
+        (function initSpeedControl() {
+            const go = () => {
+                const sl = document.getElementById('speed-slider'), ip = document.getElementById('speed-input');
+                if (sl) { sl.value = defaultSpeed; sl.addEventListener('input', () => { ip.value = sl.value; }); sl.addEventListener('change', () => window.setDefaultSpeed(sl.value)); }
+                if (ip) { ip.value = defaultSpeed; ip.addEventListener('change', () => window.setDefaultSpeed(ip.value)); ip.addEventListener('keydown', e => { if (e.key === 'Enter') ip.blur(); }); }
+                const d = document.getElementById('speed-display'); if (d) d.innerText = `Speed: ${defaultSpeed}%`;
+            };
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', go); else go();
+        })();
         let draggedIndex = null;
         let homeA = [0, 0, 0, 0, 0, 0];
         const visualOffsets = [0, 0, 0, 0, 0, 0]; 
 
         window.activeLoopCount = 1;
         window.telemetryLogs = []; 
-        window.graphLoopData = []; // 🟢 เพิ่มการเก็บค่าป้องกันล้น
+        window.graphLoopData = []; // เพิ่มการเก็บค่าป้องกันล้น
 
-        // 🟢 [REC เสถียร] แขนจริงหมุนช้ากว่าความเร็วที่คำนวณจากค่า Speed ประมาณ 6%
+        // [REC เสถียร] แขนจริงหมุนช้ากว่าความเร็วที่คำนวณจากค่า Speed ประมาณ 6%
         //    (วัดจากการทดสอบ 30 รอบ: J2 จริง 10.53°/s เทียบกับที่คำนวณได้ 11.18°/s ที่ Speed 40)
         //    จึงยืดเวลาของเส้น Target ด้วยค่านี้ ให้เส้น Target กับเส้น Actual เดินไปพร้อมกัน (ตั้ง 1.0 = ใช้ค่าคำนวณตรง ๆ)
         const HW_TIME_SCALE = 1.06;
@@ -432,14 +620,15 @@
             }
         });
 
-        // 🟢 ฟังก์ชันสำหรับเปิด/ปิด Freedrive แยกทีละแกน
+        // ฟังก์ชันสำหรับเปิด/ปิด Freedrive แยกทีละแกน
         window.toggleFreedrive = function(jointIndex, isFree, skipBulkCommand = false) {
             if(!window.robotLink || !window.robotLink.serialWriter) {
                 document.getElementById('free-j' + jointIndex).checked = !isFree;
-                return alert("⚠️ กรุณาเชื่อมต่อ Arduino ก่อนเปิดใช้งาน Teach Mode ครับ");
+                return alert("กรุณาเชื่อมต่อ Arduino ก่อนเปิดใช้งาน Teach Mode ครับ");
             }
             
             freedriveModes[jointIndex - 1] = isFree;
+            if (window.i2cFreeReset) window.i2cFreeReset(jointIndex - 1);   // [I2C] เตือนใหม่ได้ถ้าปลด Free รอบหน้าแล้วยังอ่านเซ็นเซอร์ไม่ได้
             
             let slider = document.getElementById(`joint${jointIndex}`);
             let targetInp = document.getElementById(`target${jointIndex}`);
@@ -458,25 +647,27 @@
                 targetInp.disabled = false;
                 jogBtns.forEach(btn => btn.disabled = false);
                 
-                let actualDeg = window.robot ? (window.robot.joints[jointIndex - 1].rotation.z * 180 / Math.PI) - visualOffsets[jointIndex - 1] : jointTargets[jointIndex - 1];
-                jointTargets[jointIndex - 1] = Math.round(actualDeg);
-                uiGraphTargets[jointIndex - 1] = Math.round(actualDeg);
+                // มุมจริงล่าสุดจาก LIVE (ละเอียด 0.01 องศา) ถ้าไม่มีจึงอ่านจากหุ่น 3D
+                const live = window.lastLive && window.lastLive[jointIndex - 1];
+                let actualDeg = Number.isFinite(live) ? live : (window.robot ? (window.robot.joints[jointIndex - 1].rotation.z * 180 / Math.PI) - visualOffsets[jointIndex - 1] : jointTargets[jointIndex - 1]);
+                jointTargets[jointIndex - 1] = r2(actualDeg);              // ล็อกที่ตำแหน่งจริง ไม่ปัดเป็นองศาเต็ม (แขนจึงไม่กระตุกไปหาองศาเต็ม)
+                uiGraphTargets[jointIndex - 1] = r2(actualDeg);
                 slider.value = Math.round(actualDeg);
-                targetInp.value = Math.round(actualDeg);
+                targetInp.value = fmtDeg(actualDeg);
                 
                 if(!skipBulkCommand) window.robotLink.sendJointsData(); 
             }
             
             let anyFree = freedriveModes.includes(true);
-            document.getElementById('teach-status').innerText = anyFree ? "🟢 สถานะ: มีแกนถูกปลดล็อค (Freedrive)" : "🔴 สถานะ: ควบคุมด้วยโปรแกรม";
+            document.getElementById('teach-status').innerText = anyFree ? "สถานะ: มีแกนถูกปลดล็อค (Freedrive)" : "สถานะ: ควบคุมด้วยโปรแกรม";
             document.getElementById('teach-status').style.color = anyFree ? "var(--accent-green)" : "var(--text-muted)";
         }
 
-        // 🟢 ฟังก์ชัน Master สำหรับปลดล็อค/ล็อค ทุกแกนพร้อมกัน
+        // ฟังก์ชัน Master สำหรับปลดล็อค/ล็อค ทุกแกนพร้อมกัน
         window.toggleMasterTeachMode = function(isFree) {
             if(!window.robotLink || !window.robotLink.serialWriter) {
                 document.getElementById('teach-mode-toggle').checked = !isFree;
-                return alert("⚠️ กรุณาเชื่อมต่อ Arduino ก่อนเปิดใช้งาน Teach Mode ครับ");
+                return alert("กรุณาเชื่อมต่อ Arduino ก่อนเปิดใช้งาน Teach Mode ครับ");
             }
 
             for(let i=1; i<=6; i++) {
@@ -489,12 +680,12 @@
 
             if(isFree) {
                 window.robotLink.serialWriter.write("FREE_ALL\n").catch(()=>{});
-                document.getElementById('teach-status').innerText = "🟢 ปลดล็อคทั้งหมด: ใช้มือจับแขนกลขยับได้เลย";
+                document.getElementById('teach-status').innerText = "ปลดล็อคทั้งหมด: ใช้มือจับแขนกลขยับได้เลย";
                 document.getElementById('teach-status').style.color = "var(--accent-green)";
             } else {
                 window.robotLink.serialWriter.write("LOCK_ALL\n").catch(()=>{});
                 window.robotLink.sendJointsData(); 
-                document.getElementById('teach-status').innerText = "🔴 สถานะ: ล็อคมอเตอร์ (ควบคุมด้วยโปรแกรม)";
+                document.getElementById('teach-status').innerText = "สถานะ: ล็อคมอเตอร์ (ควบคุมด้วยโปรแกรม)";
                 document.getElementById('teach-status').style.color = "var(--text-muted)";
             }
         }
@@ -516,9 +707,9 @@
             reader.onload = function(e) {
                 try {
                     let parsed = JSON.parse(e.target.result);
-                    if(Array.isArray(parsed)) { commandsData = parsed; renderBlocks(); alert("📂 โหลดโปรแกรมสำเร็จ!"); } 
-                    else { alert("❌ รูปแบบไฟล์ไม่ถูกต้อง"); }
-                } catch(err) { alert("❌ เกิดข้อผิดพลาดในการอ่านไฟล์"); }
+                    if(Array.isArray(parsed)) { commandsData = parsed; renderBlocks(); alert("โหลดโปรแกรมสำเร็จ!"); } 
+                    else { alert("รูปแบบไฟล์ไม่ถูกต้อง"); }
+                } catch(err) { alert("เกิดข้อผิดพลาดในการอ่านไฟล์"); }
                 event.target.value = ""; 
             };
             reader.readAsText(file);
@@ -528,7 +719,7 @@
         let tDatas = [];
         const chartColors = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#3498db', '#9b59b6'];
 
-        // 🟢 [REC เสถียร] ระหว่างบันทึก วาดกราฟสดเฉพาะช่วงล่าสุดและไม่ถี่เกินไป
+        // [REC เสถียร] ระหว่างบันทึก วาดกราฟสดเฉพาะช่วงล่าสุดและไม่ถี่เกินไป
         //    เดิมวาดกราฟทั้ง 6 กราฟใหม่ทั้งหมดทุก 0.1 วินาที ยิ่งบันทึกนานยิ่งหนัก จนเครื่องหน่วงและจังหวะโปรแกรมเพี้ยน
         //    ข้อมูลทุกจุดยังเก็บไว้ครบใน telemetryLogs สำหรับ Export CSV / Save Interactive เหมือนเดิม
         const LIVE_WINDOW_POINTS = 300;   // กราฟสดแสดง 30 วินาทีล่าสุด (บันทึกทุก 0.1 วินาที)
@@ -538,8 +729,8 @@
 
         function makeJointDatasets(i, actData, tgtData) {
             return [
-                // 🟢 เปลี่ยน fill: true เป็น fill: false เพื่อเอาสีใต้ออก และปรับสีให้เหลือแค่เส้น
-                { label: 'J'+(i+1) + ' Actual (จริง)', data: actData, borderColor: chartColors[i], backgroundColor: chartColors[i], borderWidth: 2, pointRadius: 0, tension: 0.1, fill: false },
+                // เปลี่ยน fill: true เป็น fill: false เพื่อเอาสีใต้ออก และปรับสีให้เหลือแค่เส้น
+                { label: 'J'+(i+1) + ' Actual (ตัวนับ step)', data: actData, borderColor: chartColors[i], backgroundColor: chartColors[i], borderWidth: 2, pointRadius: 0, tension: 0.1, fill: false },
                 { label: 'J'+(i+1) + ' Target (คำสั่ง)', data: tgtData, borderColor: '#2c3e50', borderDash: [5, 5], borderWidth: 1.5, pointRadius: 0, tension: 0, fill: false }
             ];
         }
@@ -549,7 +740,7 @@
             let labels = rows.map(r => r.label);
             let out = [];
             for (let i = 0; i < 6; i++) {
-                out.push({ labels: labels, datasets: makeJointDatasets(i, rows.map(r => Number(r.joints[i].actDeg)), rows.map(r => Number(r.joints[i].tgtDeg))) });
+                out.push({ labels: labels, datasets: makeJointDatasets(i, rows.map(r => Number(r.joints[i].actDeg)), rows.map(r => r.joints[i].tgtDeg === '' ? null : Number(r.joints[i].tgtDeg))) });
             }
             return out;
         }
@@ -574,7 +765,7 @@
             for (let i = 0; i < 6; i++) {
                 tDatas[i].labels = labels;
                 tDatas[i].datasets[0].data = rows.map(r => Number(r.joints[i].actDeg));
-                tDatas[i].datasets[1].data = rows.map(r => Number(r.joints[i].tgtDeg));
+                tDatas[i].datasets[1].data = rows.map(r => r.joints[i].tgtDeg === '' ? null : Number(r.joints[i].tgtDeg));
                 if (telemetryCharts[i]) telemetryCharts[i].update('none');
             }
         };
@@ -600,7 +791,7 @@
                                     afterLabel: function(context) {
                                         let dataIdx = context.dataIndex; let dsIdx = context.datasetIndex; let log = window.telemetryLogs[(window.liveOffset || 0) + dataIdx];
                                         if(!log) return ''; let jointLog = log.joints[i];
-                                        return dsIdx === 0 ? `▶ Steps (จริง): ${jointLog.actStep} stp\n▶ ความเร็ว: ${jointLog.speed} °/s` : `▶ Steps (คำสั่ง): ${jointLog.tgtStep} stp`;
+                                        return dsIdx === 0 ? `Steps (ตัวนับ): ${jointLog.actStep} stp\nความเร็ว: ${jointLog.speed} °/s` : `Steps (คำสั่ง): ${jointLog.tgtStep} stp`;
                                     }
                                 }
                             }
@@ -613,12 +804,71 @@
         let recordStartTime = 0; let telemetryInterval = null;
         let lastTimeForSpeed = null;
         let lastDegForSpeed = [0,0,0,0,0,0];
+        // [SENSOR] ค่าล่าสุดจากบรรทัด SENS: ของ Arduino (ตรวจด้วย AS5600 หลังแขนหยุดทุกครั้ง) รอเขียนลงแถวบันทึกถัดไป
+        window.senPending = null;
+        // [TRUELOG-BEGIN] บันทึกค่าตามที่บอร์ดรายงานจริง: เป้าหมายที่บอร์ดกำลังทำ (TGT), ตัวนับ step จริง (LIVS),
+        //   มุมดิบของ AS5600 และผลต่างที่เพลามอเตอร์ (SENX) ทศนิยม 3 ตำแหน่ง ใช้ได้ทั้งโหมด PC และโหมด CODESYS
+        const SEN_RESID_LIMIT = 10;   // องศาที่เพลามอเตอร์: ผลต่างเกินนี้ = เซ็นเซอร์ไม่สอดคล้องกับตัวนับ step
+        const TrueLog = {
+            ints(txt) {
+                const a = String(txt).split(',').slice(0, 6).map(v => parseInt(v, 10));
+                return (a.length === 6 && a.every(Number.isFinite)) ? a : null;
+            },
+            nums(txt) {
+                return String(txt).split(',').slice(0, 6).map(v => { v = String(v).trim(); return (v === '' || v === 'NA') ? null : parseFloat(v); });
+            },
+            parseSens(payload) {
+                const p = String(payload).split(';'); if (p.length < 2) return null;
+                return { step: TrueLog.nums(p[0]), sen: TrueLog.nums(p[1]) };
+            },
+            parseSenx(payload) {
+                const p = String(payload).split(';'); if (p.length < 4) return null;
+                return { raw: TrueLog.nums(p[0]), resid: TrueLog.nums(p[1]), steps: TrueLog.ints(p[2]), tgt: TrueLog.ints(p[3]) };
+            },
+            fix(v, d) { return (v === null || v === undefined || v === '' || !Number.isFinite(Number(v))) ? '' : Number(v).toFixed(d); },
+            ok(resid) { return (resid === null || resid === undefined || !Number.isFinite(resid)) ? '' : (Math.abs(resid) <= SEN_RESID_LIMIT ? 1 : 0); },
+            // คอลัมน์เดิม: StepDeg_Chk, SenDeg_Chk, SenErr_Deg (= เซ็นเซอร์ - step)
+            csvSens(s, j) {
+                if (!s || !s.sen || s.sen[j] === null || !Number.isFinite(s.sen[j]) || !s.step || !Number.isFinite(s.step[j])) return ['', '', ''];
+                return [s.step[j].toFixed(3), s.sen[j].toFixed(3), (s.sen[j] - s.step[j]).toFixed(3)];
+            },
+            // คอลัมน์ใหม่: Step_Chk, TgtStep_Chk, SenRaw_Deg, SenResid_MotorDeg, Sen_OK
+            csvSenx(s, j) {
+                const x = s && s.x; if (!x) return ['', '', '', '', ''];
+                const r = x.resid ? x.resid[j] : null;
+                return [x.steps ? x.steps[j] : '', x.tgt ? x.tgt[j] : '', TrueLog.fix(x.raw ? x.raw[j] : null, 2), TrueLog.fix(r, 2), TrueLog.ok(r)];
+            },
+            badJoints(x) {
+                const out = []; if (!x || !x.resid) return out;
+                x.resid.forEach((r, j) => { if (TrueLog.ok(r) === 0) out.push({ j: j, resid: r }); });
+                return out;
+            }
+        };
+        window.TrueLog = TrueLog;
+        window.boardTgtSteps = null;    // TGT ล่าสุดจากบอร์ด (step)
+        window.lastLiveSteps = null;    // LIVS ล่าสุดจากบอร์ด (step)
+        window.senLast = null;          // ผลตรวจ SENS ล่าสุด (SENX จะเติมข้อมูลลงอ็อบเจกต์เดียวกัน)
+        window.senBadSeen = {};         // แกนที่เตือนแล้วในการบันทึกครั้งนี้
+        window.showSenHealth = function (x) {
+            const bad = TrueLog.badJoints(x); const box = document.getElementById('sen-health');
+            bad.forEach(b => {
+                if (window.senBadSeen[b.j]) return;
+                window.senBadSeen[b.j] = b.resid;
+                console.warn('[SENSOR] J' + (b.j + 1) + ' ผลต่างที่เพลามอเตอร์ ' + b.resid.toFixed(1) + '°');
+            });
+            if (box) {
+                const keys = Object.keys(window.senBadSeen);
+                box.innerText = keys.length ? ('⚠ เซ็นเซอร์ไม่สอดคล้องกับตัวนับ step: ' + keys.map(k => 'J' + (Number(k) + 1) + ' (' + Number(window.senBadSeen[k]).toFixed(1) + '° ที่เพลามอเตอร์)').join(', ') + '\nค่า SenDeg ของแกนเหล่านี้ใช้ยืนยันมุมจริงไม่ได้ (ช่อง Sen_OK = 0 ในไฟล์ CSV)') : '';
+            }
+        };
+        // [TRUELOG-END]
 
         window.startTelemetry = function() {
             if(telemetryInterval) clearInterval(telemetryInterval);
             recordStartTime = performance.now();
-            window.telemetryLogs = []; 
-            window.graphLoopData = []; // 🟢 กันปัญหา Memory data ล้นจากการคลิกหลายครั้ง
+            window.telemetryLogs = []; window.senPending = null;   // [SENSOR] ล้างผลตรวจเก่าก่อนเริ่มบันทึก 
+            window.senBadSeen = {}; window.showSenHealth(null);   // [TRUELOG] ล้างคำเตือนเซ็นเซอร์ของการบันทึกครั้งก่อน
+            window.graphLoopData = []; // กันปัญหา Memory data ล้นจากการคลิกหลายครั้ง
             lastTimeForSpeed = performance.now();
             for(let i=0; i<6; i++) {
                 uiGraphTargets[i] = jointTargets[i];
@@ -637,19 +887,28 @@
 
                 let currentLogRow = { time: t.toFixed(1), label: tLabel, loop: isProgramRunning ? window.activeLoopCount : 0, joints: [] };
 
+                // [TRUELOG] ต่อบอร์ดอยู่: มุมจริง = ตัวนับ step ของ Arduino (LIVS) และเป้าหมาย = TGT ที่บอร์ดกำลังทำ
+                //   ไม่ใช้มุมจากหุ่น 3D และไม่คัดลอกมุมจริงไปใส่ช่องเป้าหมายเมื่อ CODESYS เป็นผู้ควบคุม
+                const linked = !!(window.robotLink && window.robotLink.serialWriter);
+                const bt = linked ? window.boardTgtSteps : null;
+                const ls = linked ? window.lastLiveSteps : null;
                 for(let i=0; i<6; i++) {
-                    let actualDeg = window.robot ? (window.robot.joints[i].rotation.z * 180 / Math.PI) - visualOffsets[i] : jointTargets[i];
-                    let targetDeg = uiGraphTargets[i];
-                    let actualStep = Math.round(actualDeg * STEPS_PER_DEGREE[i]);
-                    let targetStep = Math.round(targetDeg * STEPS_PER_DEGREE[i]);
+                    const live = window.lastLive ? window.lastLive[i] : NaN;
+                    let actualDeg = (linked && Number.isFinite(live)) ? live : (window.robot ? (window.robot.joints[i].rotation.z * 180 / Math.PI) - visualOffsets[i] : jointTargets[i]);
+                    let actualStep = ls ? ls[i] : Math.round(actualDeg * STEPS_PER_DEGREE[i]);
+                    let targetDegTxt, targetStep;
+                    if (bt) { targetStep = bt[i]; targetDegTxt = (bt[i] / STEPS_PER_DEGREE[i]).toFixed(3); }
+                    else if (linked && cdsOwnsArm) { targetStep = ''; targetDegTxt = ''; }   // เฟิร์มแวร์เก่าไม่ส่ง TGT จึงไม่รู้เป้าหมายของ CODESYS
+                    else { targetStep = Math.round(uiGraphTargets[i] * STEPS_PER_DEGREE[i]); targetDegTxt = Number(uiGraphTargets[i]).toFixed(2); }
                     let speedDegS = (actualDeg - lastDegForSpeed[i]) / dt;
 
-                    currentLogRow.joints.push({ actDeg: actualDeg.toFixed(2), tgtDeg: targetDeg.toFixed(2), actStep: actualStep, tgtStep: targetStep, speed: speedDegS.toFixed(2) });
+                    currentLogRow.joints.push({ actDeg: actualDeg.toFixed(ls ? 3 : 2), tgtDeg: targetDegTxt, actStep: actualStep, tgtStep: targetStep, speed: speedDegS.toFixed(2) });
                     lastDegForSpeed[i] = actualDeg;
                 }
+                currentLogRow.sens = window.senPending; window.senPending = null;   // [SENSOR] ผูกผลตรวจล่าสุดกับแถวนี้
                 window.telemetryLogs.push(currentLogRow);
                 lastTimeForSpeed = now;
-                window.redrawLiveCharts(false, false);   // 🟢 [REC เสถียร] วาดเฉพาะเมื่อถึงเวลาและหน้า Analytics เปิดอยู่
+                window.redrawLiveCharts(false, false);   // [REC เสถียร] วาดเฉพาะเมื่อถึงเวลาและหน้า Analytics เปิดอยู่
             }, 100);
         }
 
@@ -658,7 +917,7 @@
 
         window.clearTelemetry = function() {
             window.telemetryLogs = [];
-            window.graphLoopData = []; // 🟢 กันปัญหา Memory
+            window.graphLoopData = []; // กันปัญหา Memory
             window.redrawLiveCharts(true, true);
         }
 
@@ -685,8 +944,8 @@
     </style>
 </head>
 <body>
-    <h2>📊 ข้อมูลกราฟวิเคราะห์หุ่นยนต์</h2>
-    <p class="desc">แตะหรือนำเมาส์ไปชี้ที่เส้นกราฟเพื่อดูค่า Actual (องศาจริง) และ Target (คำสั่ง) อย่างละเอียด</p>
+    <h2>ข้อมูลกราฟวิเคราะห์หุ่นยนต์</h2>
+    <p class="desc">แตะหรือนำเมาส์ไปชี้ที่เส้นกราฟเพื่อดูค่า Actual (มุมจากตัวนับ step ของ Arduino) และ Target (คำสั่ง) อย่างละเอียด</p>
     <div id="charts-wrapper"></div>
     <script>
         const chartDataArray = ${JSON.stringify(buildChartData(window.telemetryLogs))}; const rawLogs = ${JSON.stringify(window.telemetryLogs)}; const container = document.getElementById('charts-wrapper');
@@ -704,7 +963,7 @@
                             callbacks: {
                                 afterLabel: function(context) {
                                     let log = rawLogs[context.dataIndex]; if(!log) return ''; let jointLog = log.joints[index];
-                                    return context.datasetIndex === 0 ? '▶ Steps (จริง): ' + jointLog.actStep + ' stp\\n▶ ความเร็ว: ' + jointLog.speed + ' °/s' : '▶ Steps (คำสั่ง): ' + jointLog.tgtStep + ' stp';
+                                    return context.datasetIndex === 0 ? 'Steps (ตัวนับ): ' + jointLog.actStep + ' stp\\nความเร็ว: ' + jointLog.speed + ' °/s' : 'Steps (คำสั่ง): ' + jointLog.tgtStep + ' stp';
                                 }
                             }
                         }
@@ -724,10 +983,14 @@
             if (!window.telemetryLogs || window.telemetryLogs.length === 0) return alert("ไม่มีข้อมูลกราฟให้บันทึกครับ");
             let csvContent = "\uFEFFTime(s),Loop,";
             for(let j=1; j<=6; j++) csvContent += `J${j}_Act_Deg,J${j}_Tgt_Deg,J${j}_Act_Step,J${j}_Tgt_Step,J${j}_Speed_DegPerSec,`;
+            for(let j=1; j<=6; j++) csvContent += `J${j}_StepDeg_Chk,J${j}_SenDeg_Chk,J${j}_SenErr_Deg,`;   // [SENSOR]
+            for(let j=1; j<=6; j++) csvContent += `J${j}_Step_Chk,J${j}_TgtStep_Chk,J${j}_SenRaw_Deg,J${j}_SenResid_MotorDeg,J${j}_Sen_OK,`;   // [TRUELOG]
             csvContent += "\n";
             window.telemetryLogs.forEach(log => {
                 let row = [log.time, log.loop];
                 for (let j = 0; j < 6; j++) { row.push(log.joints[j].actDeg, log.joints[j].tgtDeg, log.joints[j].actStep, log.joints[j].tgtStep, log.joints[j].speed); }
+                for (let j = 0; j < 6; j++) row.push(...TrueLog.csvSens(log.sens, j));   // [SENSOR] มีค่าเฉพาะแถวที่ตรวจหลังแขนหยุด ความคลาดเคลื่อน = เซ็นเซอร์ - step
+                for (let j = 0; j < 6; j++) row.push(...TrueLog.csvSenx(log.sens, j));   // [TRUELOG] step จริง/เป้าหมาย มุมดิบ ผลต่างที่เพลามอเตอร์ และ Sen_OK
                 csvContent += row.join(",") + "\n";
             });
             let blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -746,10 +1009,10 @@
                 // ปลดล็อคปุ่ม Teach Mode เมื่อโปรแกรมหยุด
                 document.getElementById('teach-mode-toggle').disabled = false;
                 document.querySelectorAll('input[type="checkbox"][id^="free-j"]').forEach(t => t.disabled = false);
-                window.setArmOwnerLock(cdsOwnsArm);   // 🔵 [CODESYS]
+                window.setArmOwnerLock(cdsOwnsArm);   // [CODESYS]
             } else { 
-                if (cdsOwnsArm) return alert("⚠️ CODESYS เป็นผู้ควบคุมอยู่ กรุณากด 'ขอสิทธิ์ให้หน้านี้' ก่อนครับ");   // 🔵 [CODESYS]
-                // 🟢 ระบบ Auto-Lock: บังคับล็อคทุกแกนให้แน่นสนิทก่อนรันโปรแกรม
+                if (cdsOwnsArm) return alert("CODESYS เป็นผู้ควบคุมอยู่ กรุณากด 'ขอสิทธิ์ให้หน้านี้' ก่อนครับ");   // [CODESYS]
+                // ระบบ Auto-Lock: บังคับล็อคทุกแกนให้แน่นสนิทก่อนรันโปรแกรม
                 window.toggleMasterTeachMode(false);
                 document.getElementById('teach-mode-toggle').checked = false;
 
@@ -764,7 +1027,7 @@
         class RobotConnection {
             constructor() {
                 this.serialPort = null; this.serialWriter = null; this.isScanning = false;
-                this.serialReader = null; this.readableClosed = null; this.writableClosed = null; this.isClosing = false;   // 🔌 ใช้ตอน Disconnect
+                this.serialReader = null; this.readableClosed = null; this.writableClosed = null; this.isClosing = false;   // ใช้ตอน Disconnect
                 this.ipcRenderer = null;
                 try {
                     const electron = require('electron'); this.ipcRenderer = electron.ipcRenderer;
@@ -778,26 +1041,30 @@
             }
 
             async scanPorts() {
-                if (!navigator.serial) return alert("❌ เบราว์เซอร์ของคุณไม่รองรับ Web Serial API (แนะนำให้ใช้ Google Chrome หรือ Edge บนคอมพิวเตอร์)");
+                if (!navigator.serial) return alert("เบราว์เซอร์ของคุณไม่รองรับ Web Serial API (แนะนำให้ใช้ Google Chrome หรือ Edge บนคอมพิวเตอร์)");
                 if (this.ipcRenderer && this.isScanning) { this.ipcRenderer.send('cancel-port-request'); }
 
-                if (this.serialPort) { await this.closePort(); this.resetUi('WAITING...'); }   // 🔌 กด Scan ขณะต่ออยู่: ปิดพอร์ตเดิมก่อน
+                if (this.serialPort) { await this.closePort(); this.resetUi('WAITING...'); }   // กด Scan ขณะต่ออยู่: ปิดพอร์ตเดิมก่อน
                 this.isScanning = true; document.getElementById('ros-status').innerText = 'SCANNING...';
                 try {
                     this.serialPort = await navigator.serial.requestPort(); 
                     await this.serialPort.open({ baudRate: 115200 }); 
                     const textEncoder = new TextEncoderStream(); this.writableClosed = textEncoder.readable.pipeTo(this.serialPort.writable);
                     this.serialWriter = textEncoder.writable.getWriter();
+                    // เปิดพอร์ตแล้วบอร์ดจะรีเซ็ต: รอ LIVE หลังบูต (หรือหลังเห็น System Ready) แล้วดึงมุมจริงมาเป็นเป้าหมายของหน้านี้
+                    this.connectedAt = Date.now(); this.needLiveSync = true; this.syncNotBefore = Date.now() + 1500; this.homeWaiter = null;
                     document.getElementById('ros-status').innerText = 'CONNECTED'; document.getElementById('ros-dot').classList.add('connected');
-                    alert("✅ เชื่อมต่อ Arduino สำเร็จ! ระบบพร้อมทำงานแล้ว"); this.isScanning = false;
+                    alert("เชื่อมต่อ Arduino สำเร็จ! ระบบพร้อมทำงานแล้ว"); this.isScanning = false;
 
                     document.getElementById('teach-mode-toggle').checked = false;
                     setTimeout(() => { if (this.serialWriter) this.serialWriter.write("LOCK_ALL\n").catch(()=>{}); }, 1000);
                     this.startReading(); 
-                    setTimeout(() => { if (this.serialWriter) this.serialWriter.write("WHO\n").catch(()=>{}); }, 2500);   // 🔵 [CODESYS] ถามว่าใครคุมอยู่
+                    setTimeout(() => { if (this.serialWriter) this.serialWriter.write("WHO\n").catch(()=>{}); }, 2500);   // [CODESYS] ถามว่าใครคุมอยู่
+                    setTimeout(() => sendSpeedToArduino(defaultSpeed), 3500);   // [ปุ่มปรับ Speed] Arduino เริ่มเครื่องที่ความเร็วของตัวเอง จึงส่งค่าที่ตั้งไว้ให้หลังเชื่อมต่อ
+                    setTimeout(() => { if (window.i2cCheck) window.i2cCheck(true); }, 4500);   // [I2C] ตรวจบัส I2C ให้ครั้งหนึ่งหลังบอร์ดบูตเสร็จ
                 } catch (err) { 
                     this.isScanning = false; document.getElementById('ros-status').innerText = 'WAITING...'; 
-                    if(!err.message.includes("No port selected")) alert("⚠️ เกิดข้อผิดพลาด: " + err.message);
+                    if(!err.message.includes("No port selected")) alert("เกิดข้อผิดพลาด: " + err.message);
                 }
             }
 
@@ -810,47 +1077,93 @@
                         buffer += value; let lines = buffer.split('\n'); buffer = lines.pop(); 
                         for (let line of lines) {
                             line = line.trim();
+                            // [TRUELOG] เฟิร์มแวร์ใหม่ส่ง LIVS:<ตัวนับ step J1..J6> แปลงเป็นองศาด้วยค่าเดียวกับเฟิร์มแวร์ แล้วใช้ทางเดิมของ LIVE
+                            if (line.startsWith("LIVS:")) {
+                                const st = TrueLog.ints(line.substring(5));
+                                if (!st) continue;
+                                window.lastLiveSteps = st;
+                                line = "LIVE:" + st.map((v, k) => (v / STEPS_PER_DEGREE[k]).toFixed(4)).join(',');
+                            }
+                            if (line.startsWith("TGT:")) {   // [TRUELOG] เป้าหมายที่บอร์ดกำลังทำ (step) ทั้งโหมด PC และ CODESYS
+                                const tg = TrueLog.ints(line.substring(4)); if (tg) window.boardTgtSteps = tg;
+                                continue;
+                            }
+                            if (line.startsWith("SENX:")) {   // [TRUELOG] ข้อมูลละเอียดของผลตรวจ SENS ล่าสุด
+                                const x = TrueLog.parseSenx(line.substring(5));
+                                if (x && window.senLast) { window.senLast.x = x; window.showSenHealth(x); }
+                                continue;
+                            }
                             if (line.startsWith("LIVE:")) {
                                 let angles = line.substring(5).split(','); 
+                                window.lastLive = angles.map(v => parseFloat(v));
+                                window.liveHasDecimals = line.indexOf('.') >= 0;   // เฟิร์มแวร์ใหม่ส่งทศนิยม 2 ตำแหน่ง   // [I2C] ใช้รอให้แกนถึงตำแหน่งตอนทดสอบพอร์ตเซ็นเซอร์
+                                // หลังเชื่อมต่อใหม่: ใช้มุมจริงของแขนเป็นเป้าหมาย (ไม่งั้นช่องเป้าหมายเป็น 0 แล้วแกนอื่นจะวิ่งกลับ 0 เมื่อขยับแกนเดียว)
+                                const lk = window.robotLink;
+                                if (lk && lk.needLiveSync && Date.now() >= lk.syncNotBefore && angles.length >= 6 && !isProgramRunning) {
+                                    lk.needLiveSync = false;
+                                    for (let i = 0; i < 6; i++) {
+                                        let a = r2(parseFloat(angles[i])); if (isNaN(a)) continue;
+                                        jointTargets[i] = a; uiGraphTargets[i] = a;
+                                        const sl = document.getElementById('joint' + (i + 1)); if (sl) sl.value = Math.round(a);
+                                        const ti = document.getElementById('target' + (i + 1)); if (ti) ti.value = fmtDeg(a);
+                                    }
+                                }
                                 if (angles.length > 0 && window.robot) {
                                     for (let i = 0; i < angles.length; i++) {
-                                        let angle = parseInt(angles[i], 10);
+                                        let angle = r2(parseFloat(angles[i]));
                                         if (!isNaN(angle) && window.robot.joints[i]) {
                                             // อัปเดตหุ่น 3D เสมอ
                                             window.robot.joints[i].rotation.z = (angle + visualOffsets[i]) * Math.PI / 180;
 
-                                            // 🟢 ถ้าแกนนี้เปิด Free อยู่ ให้ UI วิ่งตามมือที่จับหุ่นเลย
-                                            // 🔵 [CODESYS] ขณะ CODESYS คุมอยู่ก็ให้ UI วิ่งตามแขนจริงเช่นกัน เพื่อให้เป้าหมายของหน้านี้ตรงกับตำแหน่งจริงตอนได้สิทธิ์คืน
+                                            // ถ้าแกนนี้เปิด Free อยู่ ให้ UI วิ่งตามมือที่จับหุ่นเลย
+                                            // [CODESYS] ขณะ CODESYS คุมอยู่ก็ให้ UI วิ่งตามแขนจริงเช่นกัน เพื่อให้เป้าหมายของหน้านี้ตรงกับตำแหน่งจริงตอนได้สิทธิ์คืน
                                             if ((freedriveModes[i] || cdsOwnsArm) && !isProgramRunning) {
                                                 jointTargets[i] = angle;
                                                 uiGraphTargets[i] = angle; 
                                                 let valDisplay = document.getElementById('val' + (i + 1));
-                                                if(valDisplay) valDisplay.innerText = angle + '°'; 
-                                                document.getElementById('joint'+(i+1)).value = angle;
-                                                document.getElementById('target'+(i+1)).value = angle;
+                                                if(valDisplay) valDisplay.innerText = fmtDeg(angle) + '°'; 
+                                                document.getElementById('joint'+(i+1)).value = Math.round(angle);
+                                                document.getElementById('target'+(i+1)).value = fmtDeg(angle);
                                             } else if (!isProgramRunning && !freedriveModes[i]) {
                                                 // อัปเดตแค่ข้อความแสดงองศาจริง
                                                 let valDisplay = document.getElementById('val' + (i + 1));
-                                                if(valDisplay) valDisplay.innerText = angle + '°'; 
+                                                if(valDisplay) valDisplay.innerText = fmtDeg(angle) + '°'; 
                                             }
                                         }
                                     }
                                     if(window.updateTCP) window.updateTCP();
                                 }
                             }
-                            else if (line.startsWith("OWNER:")) { window.handleOwnerLine(line.substring(6)); }   // 🔵 [CODESYS]
-                            else if (line.startsWith("RANGE:")) { console.warn(line); alert("⚠️ Arduino ปฏิเสธคำสั่ง: " + line.substring(6).trim()); }   // 🟢 มุมเกินขอบเขต
+                            else if (line.startsWith("HOME:")) {   // HOME:OK หรือ HOME:FAIL,<สาเหตุ>
+                                let r = line.substring(5).trim(); if (r.startsWith('FAIL,')) r = r.substring(5);
+                                if (window.robotLink && window.robotLink.homeWaiter) window.robotLink.homeWaiter(r);
+                            }
+                            else if (line.includes("System Ready")) { if (window.robotLink) window.robotLink.syncNotBefore = 0; }
+                            else if (line.startsWith("OWNER:")) { window.handleOwnerLine(line.substring(6)); }   // [CODESYS]
+                            else if (line.startsWith("SENS:")) {   // [SENSOR] SENS:<มุมจาก step J1..J6>;<มุมจากเซ็นเซอร์ J1..J6>
+                                const sv = TrueLog.parseSens(line.substring(5));
+                                if (sv) {
+                                    window.senPending = sv; window.senLast = sv;   // [TRUELOG] SENX ที่ตามมาจะเติมลงอ็อบเจกต์นี้ (แถวที่บันทึกไปแล้วก็ได้ค่าด้วย)
+                                    console.log('SENS step=', sv.step, 'sensor=', sv.sen);
+                                }
+                            }
+                            else if (line.startsWith("FREESEN:")) {   // [I2C] แกนที่ปลด Free อ่านเซ็นเซอร์ไม่ได้
+                                const v = line.substring(8).split(',').map(x => parseInt(x, 10));
+                                if (window.handleFreeSenFail) window.handleFreeSenFail(v[0], v[1]);
+                            }
+                            else if (line.startsWith("I2C:")) { if (window.handleI2CLine) window.handleI2CLine(line.substring(4).trim()); }   // [I2C] ผลตรวจบัส I2C
+                            else if (line.startsWith("RANGE:")) { console.warn(line); alert("Arduino ปฏิเสธคำสั่ง: " + line.substring(6).trim()); }   // มุมเกินขอบเขต
                         }
                     }
                 } catch (e) { console.error("พอร์ตถูกตัดการเชื่อมต่อ:", e); }
-                // 🔌 สาย USB หลุดระหว่างใช้งาน (ไม่ได้กด Disconnect): ปิดพอร์ตให้เรียบร้อยและแสดงสถานะให้ตรง
+                // สาย USB หลุดระหว่างใช้งาน (ไม่ได้กด Disconnect): ปิดพอร์ตให้เรียบร้อยและแสดงสถานะให้ตรง
                 if (!this.isClosing && this.serialReader === reader) {
                     await this.closePort();
                     this.resetUi('DISCONNECTED (USB LOST)');
                 }
             }
 
-            // 🔌 ปิดพอร์ตตามลำดับที่ Web Serial ต้องการ: หยุดอ่าน -> ปิดฝั่งเขียน -> ปิดพอร์ต (COM ว่าง ใช้ Arduino IDE ได้ทันที)
+            // ปิดพอร์ตตามลำดับที่ Web Serial ต้องการ: หยุดอ่าน -> ปิดฝั่งเขียน -> ปิดพอร์ต (COM ว่าง ใช้ Arduino IDE ได้ทันที)
             async closePort() {
                 this.isClosing = true;
                 const port = this.serialPort, writer = this.serialWriter, reader = this.serialReader;
@@ -866,8 +1179,10 @@
 
             resetUi(statusText) {
                 document.getElementById('ros-status').innerText = statusText;
+                if (window.i2cReset) window.i2cReset();                      // [I2C] ไม่ได้เชื่อมต่อ = ไม่รู้สถานะบัส
                 document.getElementById('ros-dot').classList.remove('connected');
-                cdsOwnsArm = false;                                          // 🔵 [CODESYS] ไม่ได้เชื่อมต่อ = ไม่รู้ว่าใครคุม
+                cdsOwnsArm = false;                                          // [CODESYS] ไม่ได้เชื่อมต่อ = ไม่รู้ว่าใครคุม
+                window.boardTgtSteps = null; window.lastLiveSteps = null; window.senLast = null;   // [TRUELOG] ค่าของบอร์ดหลุดไปแล้ว
                 if (window.setArmOwnerLock) window.setArmOwnerLock(false);
                 const st = document.getElementById('owner-status');
                 if (st) { st.innerText = 'ผู้ควบคุม: ยังไม่ทราบ (ยังไม่ได้เชื่อมต่อ)'; st.style.color = 'var(--text-muted)'; }
@@ -875,32 +1190,341 @@
             }
 
             async disconnect() {
-                if (!this.serialPort) return alert("ℹ️ ยังไม่ได้เชื่อมต่อ Arduino");
+                if (!this.serialPort) return alert("ยังไม่ได้เชื่อมต่อ Arduino");
                 if (isProgramRunning) window.toggleProgram();               // หยุดโปรแกรมของหน้านี้ (ฟังก์ชันนี้ส่ง STOP ให้เอง)
                 else if (!cdsOwnsArm && this.serialWriter) {                // PC คุมอยู่: หยุดแขนก่อนปล่อยพอร์ต / ถ้า CODESYS คุมอยู่ไม่ยุ่ง
                     try { await this.serialWriter.write("STOP\n"); } catch (e) {}
                 }
                 await this.closePort();
                 this.resetUi('DISCONNECTED');
-                alert("🔌 ตัดการเชื่อมต่อแล้ว พอร์ต COM ว่างแล้ว (อัปโหลดโค้ดหรือกด Scan เพื่อเชื่อมต่อใหม่ได้)");
+                alert("ตัดการเชื่อมต่อแล้ว พอร์ต COM ว่างแล้ว (อัปโหลดโค้ดหรือกด Scan เพื่อเชื่อมต่อใหม่ได้)");
             }
 
             connect() {
                 if (this.ipcRenderer) {
                     const id = document.getElementById('com-port-select').value;
-                    if(!id) return alert("⚠️ กรุณากดปุ่ม Scan แล้วเลือกพอร์ตก่อนครับ");
+                    if(!id) return alert("กรุณากดปุ่ม Scan แล้วเลือกพอร์ตก่อนครับ");
                     this.ipcRenderer.send('connect-to-port', id);
-                } else { alert("⚠ ในโหมดเว็บปกติ ให้ใช้ปุ่ม Scan ค้นหาและเชื่อมต่อพอร์ตได้เลยครับ"); }
+                } else { alert("ในโหมดเว็บปกติ ให้ใช้ปุ่ม Scan ค้นหาและเชื่อมต่อพอร์ตได้เลยครับ"); }
             }
 
             async sendJointsData() {
                 if(!this.serialWriter) return;
-                if(cdsOwnsArm) return;   // 🔵 [CODESYS] ไม่ส่งคำสั่งเคลื่อนที่ขณะ CODESYS คุมอยู่
-                let degs = jointTargets.map(d => Math.round(d));
+                if(cdsOwnsArm) return;   // [CODESYS] ไม่ส่งคำสั่งเคลื่อนที่ขณะ CODESYS คุมอยู่
+                let degs = jointTargets.map(d => fmtDeg(d));            // ส่งทศนิยม 2 ตำแหน่ง (เฟิร์มแวร์รับมุมทศนิยมได้)
                 try { await this.serialWriter.write(`A${degs.join(',')}\n`); } catch(e) {}
             }
         }
         window.robotLink = new RobotConnection();
+
+        // ==========================================
+        // [I2C] แผงสถานะบัส I2C
+        // ==========================================
+        // ส่งคำสั่ง I2C ไปที่ Arduino แล้วแสดงผลจากบรรทัดที่ตอบกลับ
+        //   I2C:<mux>,<timeout>,<ports>;<J1>;...;<J6>;P:<มุมพอร์ต 0..7>;D:<sensorDir>;R:<sensorRatio>
+        //   <Jn> = <พอร์ต>,<ตอบ>,<STATUS>,<AGC>,<MAGNITUDE>,<มุม> หรือ NA   (P, D, R มีในเฟิร์มแวร์ตั้งแต่รุ่นที่มีการทดสอบพอร์ต)
+        //   I2C:BUSY  เมื่อแขนกำลังเคลื่อนที่ (Arduino ไม่อ่านระหว่างเคลื่อนที่ เพื่อไม่ให้พัลส์สะดุด)
+        // บิตใน STATUS (0x0B) ของ AS5600: bit5 MD = พบแม่เหล็ก, bit4 ML = แม่เหล็กอ่อนไป, bit3 MH = แม่เหล็กแรงไป
+        (function () {
+            const AXES = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6'];
+            const REPLY_TIMEOUT_MS = 1500, AUTO_PERIOD_MS = 2000;
+            let pending = null;                 // คำขอ I2C ที่รอคำตอบอยู่ (ครั้งละ 1 คำขอ)
+            let autoTimer = null, lastPortAng = null, mapTestRunning = false;
+            const freeWarned = [false, false, false, false, false, false];
+            const el = id => document.getElementById(id);
+            const sleep = ms => new Promise(r => setTimeout(r, ms));
+            const wrap180 = d => { d = ((d + 180) % 360 + 360) % 360 - 180; return d; };
+
+            function setBadge(text, cls) { const b = el('i2c-badge'); b.innerText = text; b.className = 'i2c-badge' + (cls ? ' ' + cls : ''); }
+            function cell(text, cls) { return '<td' + (cls ? ' class="i2c-' + cls + '"' : '') + '>' + text + '</td>'; }
+            function renderEmpty() {
+                el('i2c-rows').innerHTML = AXES.map(a => '<tr>' + cell(a) + cell('-') + cell('-') + cell('-') + cell('-') + cell('-') + '</tr>').join('');
+            }
+            function magnet(st) {
+                if (st < 0) return ['-', 'na'];
+                const md = (st >> 5) & 1, ml = (st >> 4) & 1, mh = (st >> 3) & 1;
+                if (!md) return ['ไม่พบแม่เหล็ก', 'err'];
+                if (mh) return ['แรงเกิน (ชิดไป)', 'warn'];
+                if (ml) return ['อ่อนไป (ห่างไป)', 'warn'];
+                return ['ปกติ', 'ok'];
+            }
+            function portList(mask) {
+                const ps = []; for (let p = 0; p < 8; p++) if (mask & (1 << p)) ps.push(p);
+                return ps;
+            }
+
+            function parseReport(body) {
+                const parts = body.split(';');
+                const head = (parts[0] || '').split(',').map(v => parseInt(v, 10));
+                if (parts.length < 7 || head.length < 3 || head.some(isNaN)) return null;
+                const rep = { mux: head[0], timeout: head[1], mask: head[2], axes: [], portAng: null, dir: null, ratio: null };
+                for (let i = 0; i < 6; i++) {
+                    const f = (parts[i + 1] || '').trim();
+                    if (f === 'NA') { rep.axes.push(null); continue; }
+                    const v = f.split(',');
+                    rep.axes.push({ port: parseInt(v[0], 10), ack: v[1] === '1', st: parseInt(v[2], 10), agc: parseInt(v[3], 10), mag: parseInt(v[4], 10), ang: parseFloat(v[5]) });
+                }
+                for (const seg of parts.slice(7)) {
+                    const t = seg.trim();
+                    if (t.startsWith('P:')) rep.portAng = t.slice(2).split(',').map(parseFloat);
+                    else if (t.startsWith('D:')) rep.dir = t.slice(2).split(',').map(v => parseInt(v, 10));
+                    else if (t.startsWith('R:')) rep.ratio = t.slice(2).split(',').map(parseFloat);
+                }
+                return rep;
+            }
+
+            function render(rep) {
+                const found = portList(rep.mask);
+                const rows = [], problems = [], warnings = [], usedPorts = [];
+                let nSensor = 0, nOk = 0, nErr = 0;
+                rep.axes.forEach((a, i) => {
+                    if (!a) {
+                        rows.push('<tr>' + cell(AXES[i]) + cell('-') + cell('ไม่มีเซ็นเซอร์', 'na') + cell('-') + cell('-') + cell('-') + '</tr>');
+                        return;
+                    }
+                    nSensor++; usedPorts.push(a.port);
+                    const [mText, mCls] = a.ack ? magnet(a.st) : ['-', 'na'];
+                    if (!a.ack) { nErr++; problems.push(AXES[i] + ' ไม่ตอบที่พอร์ต ' + a.port + ' ตรวจสายและขั้วต่อของเซ็นเซอร์ ' + AXES[i]); }
+                    else if (mCls === 'err') { nErr++; problems.push(AXES[i] + ' ต่อสายได้ แต่ไม่พบแม่เหล็ก ตรวจแม่เหล็กที่ปลายเพลามอเตอร์'); }
+                    else if (mCls === 'warn') warnings.push(AXES[i] + ' แม่เหล็ก' + mText + ' ปรับระยะห่างระหว่างแม่เหล็กกับชิป');
+                    else nOk++;
+                    rows.push('<tr>' + cell(AXES[i]) + cell(isNaN(a.port) ? '-' : String(a.port)) +
+                        cell(a.ack ? 'ตอบรับ' : 'ไม่ตอบ', a.ack ? 'ok' : 'err') + cell(mText, mCls) +
+                        cell(a.ack && a.agc >= 0 ? String(a.agc) : '-') + cell(a.ack && a.ang >= 0 ? a.ang.toFixed(2) + '°' : '-') + '</tr>');
+                });
+                el('i2c-rows').innerHTML = rows.join('');
+
+                el('i2c-bus').innerHTML = 'MUX TCA9548A (0x70): ' + (rep.mux === 1 ? '<span class="i2c-ok">ตอบรับ</span>' : '<span class="i2c-err">ไม่ตอบ</span>') +
+                    (rep.timeout === 1 ? '  |  บัส: <span class="i2c-warn">เคยค้างจนหมดเวลา</span>' : '  |  บัส: <span class="i2c-ok">ปกติ</span>');
+                el('i2c-ports').innerText = 'พอร์ต MUX ที่พบ AS5600 (0x36): ' + (found.length ? found.join(', ') : 'ไม่พบ');
+
+                // มุมดิบของทุกพอร์ต: พอร์ตที่มุมเปลี่ยนเกิน 2° จากครั้งก่อนจะเป็นสีฟ้า (ใช้ดูว่าหมุนแกนแล้วพอร์ตไหนเปลี่ยน)
+                if (rep.portAng) {
+                    const items = [];
+                    rep.portAng.forEach((a, p) => {
+                        if (!(a >= 0)) return;
+                        const moved = lastPortAng && lastPortAng[p] >= 0 && Math.abs(wrap180(a - lastPortAng[p])) > 2;
+                        items.push('<span' + (moved ? ' class="i2c-chg"' : '') + '>P' + p + ' ' + a.toFixed(1) + '°</span>');
+                    });
+                    el('i2c-portang').innerHTML = 'มุมดิบแต่ละพอร์ต: ' + (items.length ? items.join(' · ') : '-');
+                    lastPortAng = rep.portAng.slice();
+                } else {
+                    el('i2c-portang').innerText = '';
+                }
+
+                if (rep.mux !== 1) {
+                    // MUX ไม่ตอบ: ถ้าเซ็นเซอร์ทุกแกนก็ไม่ตอบด้วย สาเหตุน่าจะอยู่ที่ MUX จึงแสดงบรรทัดเดียว
+                    if (nErr === nSensor) problems.length = 0;
+                    problems.unshift('MUX ไม่ตอบที่ 0x70 ตรวจสาย SDA (ขา 20), SCL (ขา 21), ไฟเลี้ยงและกราวด์ของ MUX' + (nErr === nSensor ? ' (เซ็นเซอร์ทุกแกนจึงอ่านไม่ได้)' : ''));
+                }
+                if (rep.timeout === 1) warnings.push('บัส I2C เคยค้างจนหมดเวลาตั้งแต่ตรวจครั้งก่อน อาจมีสายหลวมหรือสัญญาณรบกวน');
+                const extra = found.filter(p => !usedPorts.includes(p));
+                if (extra.length) warnings.push('พบ AS5600 ที่พอร์ต ' + extra.join(', ') + ' ซึ่งไม่มีแกนไหนใช้ สายอาจเสียบผิดพอร์ต กด "ค้นหาพอร์ตและทิศเซ็นเซอร์" เพื่อตรวจ');
+
+                if (problems.length) setBadge(rep.mux !== 1 ? 'ไม่พบ MUX' : 'มีปัญหา ' + nErr + ' แกน', 'err');
+                else if (warnings.length) setBadge('ควรตรวจ (' + nOk + '/' + nSensor + ' ปกติ)', 'warn');
+                else setBadge('ปกติ ' + nOk + '/' + nSensor, 'ok');
+                el('i2c-note').innerText = problems.concat(warnings).join('\n');
+                el('i2c-time').innerText = 'ตรวจล่าสุด ' + new Date().toLocaleTimeString('th-TH');
+            }
+
+            window.handleI2CLine = function (body) {
+                const w = pending;
+                if (w) { clearTimeout(w.timer); pending = null; }
+                if (body === 'BUSY') {
+                    if (w && !w.quiet) el('i2c-note').innerText = 'แขนกำลังเคลื่อนที่ จะตรวจได้เมื่อแขนหยุดนิ่ง';
+                    if (w) w.resolve('BUSY');
+                    return;
+                }
+                const rep = parseReport(body);
+                if (!rep) { console.warn('I2C: รูปแบบไม่ถูกต้อง', body); if (w) w.resolve(null); return; }
+                render(rep);
+                if (w) w.resolve(rep);
+            };
+
+            // ส่งคำสั่ง I2C 1 ครั้ง คืน Promise ของผลที่อ่านได้ หรือ 'BUSY' / 'TIMEOUT' / 'PENDING' / null
+            function request(quiet) {
+                return new Promise(resolve => {
+                    const lk = window.robotLink;
+                    if (!lk || !lk.serialWriter) { resolve(null); return; }
+                    if (pending) { resolve('PENDING'); return; }
+                    const w = { quiet: quiet, resolve: resolve };
+                    w.timer = setTimeout(() => {
+                        if (pending !== w) return;
+                        pending = null;
+                        setBadge('Arduino ไม่ตอบ', 'err');
+                        el('i2c-note').innerText = 'Arduino ไม่ตอบคำสั่ง I2C ตรวจว่าอัปโหลดเฟิร์มแวร์ตัวใหม่แล้ว';
+                        if (!quiet) window.uiNotify('Arduino ไม่ตอบคำสั่ง I2C\nตรวจว่าอัปโหลดเฟิร์มแวร์ตัวใหม่ (ที่มีคำสั่ง I2C) แล้ว', 'warn');
+                        resolve('TIMEOUT');
+                    }, REPLY_TIMEOUT_MS);
+                    pending = w;
+                    lk.serialWriter.write('I2C\n').catch(() => {});
+                });
+            }
+
+            window.i2cCheck = function (quiet) {
+                const lk = window.robotLink;
+                if (!lk || !lk.serialWriter) { if (!quiet) alert('กรุณาเชื่อมต่อ Arduino ก่อนครับ'); return; }
+                if (pending || mapTestRunning) return;
+                request(quiet);
+            };
+
+            window.i2cSetAuto = function (on) {
+                if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+                if (!on) return;
+                autoTimer = setInterval(() => {
+                    const lk = window.robotLink;
+                    if (!lk || !lk.serialWriter || isProgramRunning || mapTestRunning) return;   // ไม่ได้เชื่อมต่อ / โปรแกรมกำลังรัน / กำลังทดสอบพอร์ต: ข้าม
+                    window.i2cCheck(true);
+                }, AUTO_PERIOD_MS);
+                window.i2cCheck(true);
+            };
+
+            window.i2cReset = function () {
+                if (pending) { clearTimeout(pending.timer); const w = pending; pending = null; w.resolve(null); }
+                lastPortAng = null;
+                setBadge('ยังไม่ได้เชื่อมต่อ', '');
+                el('i2c-bus').innerText = 'MUX TCA9548A (0x70): -';
+                el('i2c-ports').innerText = 'พอร์ต MUX ที่พบ AS5600 (0x36): -';
+                el('i2c-portang').innerText = '';
+                el('i2c-note').innerText = ''; el('i2c-time').innerText = '';
+                renderEmpty();
+            };
+
+            // ---------- แกนปลด Free แต่ Arduino อ่านเซ็นเซอร์ของแกนนั้นไม่ได้ (บรรทัด FREESEN:<แกน>,<พอร์ต>) ----------
+            window.handleFreeSenFail = function (axis, port) {
+                const i = axis - 1;
+                if (i < 0 || i > 5 || !freedriveModes[i] || freeWarned[i]) return;
+                freeWarned[i] = true;
+                const msg = 'J' + axis + ' ปลด Free อยู่ แต่ Arduino อ่านเซ็นเซอร์ของ J' + axis + ' (พอร์ต MUX ' + port + ') ไม่ได้\nตำแหน่งในซิมจึงไม่ขยับตามมือ ดูสาเหตุได้ที่แผง I2C Sensor Bus';
+                el('i2c-note').innerText = msg;
+                window.uiNotify(msg, 'warn');
+            };
+            window.i2cFreeReset = function (i) { if (i >= 0 && i < 6) freeWarned[i] = false; };
+
+            // ---------- ค้นหาพอร์ตและทิศของเซ็นเซอร์แต่ละแกน ----------
+            // สั่งแกนละนิด (ให้เพลามอเตอร์หมุนราว 90°) แล้วดูว่ามุมของพอร์ตไหนเปลี่ยน และเปลี่ยนไปทางไหน จากนั้นกลับท่าเดิม
+            //   พอร์ตที่เปลี่ยนมากที่สุด = พอร์ตของเซ็นเซอร์แกนนั้นจริง
+            //   ทิศ = เครื่องหมายของมุมเซ็นเซอร์ที่เปลี่ยน เทียบกับทิศที่สั่ง (ตรงกับความหมายของ sensorDir ในเฟิร์มแวร์)
+            async function waitSettled(axis, target, timeoutMs) {
+                const t0 = Date.now();
+                await sleep(400);
+                while (Date.now() - t0 < timeoutMs) {
+                    if (!window.robotLink || !window.robotLink.serialWriter) throw new Error('ตัดการเชื่อมต่อระหว่างทดสอบ');
+                    const live = window.lastLive;
+                    if (live && Math.abs(live[axis] - target) <= 0.75) {
+                        const r = await request(true);
+                        if (r && typeof r === 'object') return r;
+                    }
+                    await sleep(250);
+                }
+                throw new Error('J' + (axis + 1) + ' ไปไม่ถึงตำแหน่งภายในเวลาที่กำหนด');
+            }
+            async function sendJoints(q) {
+                const lk = window.robotLink;
+                if (!lk || !lk.serialWriter) throw new Error('ตัดการเชื่อมต่อระหว่างทดสอบ');
+                await lk.serialWriter.write('A' + q.map(v => Number(v).toFixed(2)).join(',') + '\n');
+            }
+
+            window.i2cMapTest = async function () {
+                const lk = window.robotLink;
+                if (!lk || !lk.serialWriter) return alert('กรุณาเชื่อมต่อ Arduino ก่อนครับ');
+                if (cdsOwnsArm) return window.notifyBlocked("CODESYS เป็นผู้ควบคุมแขนอยู่ กด 'ขอสิทธิ์ให้หน้านี้' ก่อนจึงจะทดสอบได้");
+                if (isProgramRunning) return window.notifyBlocked('โปรแกรมกำลังทำงานอยู่ กด Stop Program ก่อนจึงจะทดสอบได้');
+                if (freedriveModes.some(Boolean)) return window.notifyBlocked('มีแกนปลดล็อก (Free) อยู่ ล็อกทุกแกนก่อนจึงจะทดสอบได้');
+                if (mapTestRunning) return;
+                if (!confirm('แขนจะขยับ J1 ถึง J5 ทีละแกน แกนละเล็กน้อย (เพลามอเตอร์หมุนราว 90°) แล้วกลับท่าเดิม\nตรวจว่ารอบแขนไม่มีสิ่งกีดขวาง แล้วกด OK เพื่อเริ่ม')) return;
+
+                mapTestRunning = true;
+                const btn = el('i2c-map-btn'); if (btn) btn.disabled = true;
+                const out = el('i2c-map');
+                const base = jointTargets.map(Number);
+                const results = [];
+                try {
+                    while (pending) await sleep(100);
+                    out.innerText = 'กำลังอ่านค่าเริ่มต้น...';
+                    const first = await waitSettled(0, base[0], 8000);
+                    if (!first.portAng || !first.dir || !first.ratio) throw new Error('เฟิร์มแวร์ยังเป็นรุ่นเก่า (ไม่มีมุมรายพอร์ต) อัปโหลดเฟิร์มแวร์ตัวใหม่ก่อน');
+                    for (let k = 0; k < 6; k++) {
+                        if (!first.axes[k]) { results.push(null); continue; }
+                        out.innerText = 'กำลังทดสอบ ' + AXES[k] + ' ...';
+                        const R = first.ratio[k] > 0 ? first.ratio[k] : 1;
+                        let d = Math.round(90 / R * 100) / 100;
+                        const lim = JOINT_LIMITS[k];
+                        if (base[k] + d > lim[1] - 0.5) d = -d;
+                        const before = await waitSettled(k, base[k], 8000);
+                        const q1 = base.slice(); q1[k] = base[k] + d;
+                        await sendJoints(q1);
+                        let after;
+                        try { after = await waitSettled(k, q1[k], 20000); }
+                        finally { await sendJoints(base); }
+                        await waitSettled(k, base[k], 20000);
+
+                        const expect = Math.abs(d) * R;
+                        const deltas = before.portAng.map((a, p) => (a >= 0 && after.portAng[p] >= 0) ? wrap180(after.portAng[p] - a) : null);
+                        let best = -1, second = 0;
+                        deltas.forEach((v, p) => { if (v === null) return; if (best < 0 || Math.abs(v) > Math.abs(deltas[best])) best = p; });
+                        deltas.forEach((v, p) => { if (v !== null && p !== best) second = Math.max(second, Math.abs(v)); });
+                        const r = { axis: k, setPort: first.axes[k].port, setDir: first.dir[k], d: d, expect: expect, deltas: deltas };
+                        if (best < 0 || Math.abs(deltas[best]) < expect * 0.33) { r.foundPort = null; }
+                        else {
+                            r.foundPort = best; r.foundDir = Math.sign(deltas[best]) * Math.sign(d);
+                            r.pct = Math.abs(deltas[best]) / expect * 100; r.clean = second < Math.abs(deltas[best]) * 0.25;
+                        }
+                        results.push(r);
+                    }
+                    showMapResults(results);
+                } catch (e) {
+                    out.innerText = 'ทดสอบไม่สำเร็จ: ' + e.message;
+                    window.uiNotify('ทดสอบพอร์ตเซ็นเซอร์ไม่สำเร็จ\n' + e.message, 'error');
+                    try { await sendJoints(base); } catch (e2) {}
+                } finally {
+                    mapTestRunning = false;
+                    if (btn) btn.disabled = false;
+                }
+            };
+
+            function showMapResults(results) {
+                const rows = [], fixes = [];
+                results.forEach((r, k) => {
+                    if (!r) { rows.push('<tr>' + cell(AXES[k]) + cell('-') + cell('-') + cell('-') + cell('ไม่มีเซ็นเซอร์', 'na') + '</tr>'); return; }
+                    const setTxt = 'P' + r.setPort + ' / ' + (r.setDir > 0 ? '+1' : '-1');
+                    if (r.foundPort === null) {
+                        rows.push('<tr>' + cell(AXES[k]) + cell(setTxt) + cell('ไม่พบ', 'err') + cell('-') + cell('ไม่มีพอร์ตไหนหมุนตาม', 'err') + '</tr>');
+                        fixes.push(AXES[k] + ': สั่งแกนแล้วไม่มีเซ็นเซอร์ตัวไหนหมุนตาม ตรวจว่าเซ็นเซอร์ตอบรับ แม่เหล็กยังติดอยู่ และติดอยู่กับเพลามอเตอร์ของแกนนี้จริง');
+                        return;
+                    }
+                    const foundTxt = 'P' + r.foundPort + ' / ' + (r.foundDir > 0 ? '+1' : '-1');
+                    const issues = [];
+                    if (r.foundPort !== r.setPort) issues.push('พอร์ตไม่ตรง');
+                    if (r.foundDir !== r.setDir) issues.push('ทิศกลับ');
+                    if (r.pct < 80 || r.pct > 120) issues.push('อัตราทดไม่ตรง');
+                    if (!r.clean) issues.push('มีพอร์ตอื่นเปลี่ยนด้วย');
+                    rows.push('<tr>' + cell(AXES[k]) + cell(setTxt) + cell(foundTxt, issues.length ? 'err' : 'ok') + cell(r.pct.toFixed(0) + '%') +
+                        cell(issues.length ? issues.join(', ') : 'ถูกต้อง', issues.length ? 'err' : 'ok') + '</tr>');
+                    if (r.foundPort !== r.setPort) {
+                        const owner = results.find(o => o && o !== r && o.setPort === r.foundPort);
+                        fixes.push(AXES[k] + ': portMap[' + k + '] = ' + r.foundPort + ' (ตอนนี้ตั้งไว้ ' + r.setPort + (owner ? ' และพอร์ต ' + r.foundPort + ' ตั้งให้ ' + AXES[owner.axis] + ' อยู่' : '') + ')');
+                    }
+                    if (r.foundDir !== r.setDir) fixes.push(AXES[k] + ': sensorDir[' + k + '] = ' + (r.foundDir > 0 ? '1.0' : '-1.0'));
+                    if (r.pct < 80 || r.pct > 120) {
+                        const Rnow = r.expect / Math.abs(r.d);
+                        fixes.push(AXES[k] + ': เซ็นเซอร์หมุน ' + r.pct.toFixed(0) + '% ของที่ควร (อย่าแก้ gearRatios เพราะจะทำให้แกนหมุนผิดจากที่สั่ง) ' +
+                            'ถ้าเซ็นเซอร์ติดที่เพลามอเตอร์ แปลว่ามอเตอร์หมุนไม่ครบ ให้ตรวจไมโครสเต็ปของไดรเวอร์ให้ตรงกับ pulsePerRev[' + k + '] และวัดมุมจริงของแกน; ' +
+                            'ถ้าเซ็นเซอร์ติดหลังเฟืองหรือสายพาน ให้แก้ sensorRatio[' + k + '] = ' + (Rnow * r.pct / 100).toFixed(3) + ' (ตอนนี้ ' + Rnow.toFixed(3) + ')');
+                    }
+                });
+                let html = '<table class="i2c-table"><thead><tr><th>แกน</th><th>ตั้งไว้ (พอร์ต/ทิศ)</th><th>พบจริง</th><th>หมุน</th><th>ผล</th></tr></thead><tbody>' + rows.join('') + '</tbody></table>';
+                if (fixes.length) html += '<div class="i2c-line" style="white-space: pre-line; user-select: text;"><b>ต้องแก้ในเฟิร์มแวร์:</b>\n' + fixes.join('\n') + '\nแก้แล้วอัปโหลดใหม่ จากนั้นจัดแขนไปท่า Home จริงแล้วกด Set Current as Home อีกครั้ง</div>';
+                else html += '<div class="i2c-line i2c-ok">พอร์ตและทิศของเซ็นเซอร์ทุกแกนตรงกับเฟิร์มแวร์</div>';
+                el('i2c-map').innerHTML = html;
+                window.i2cMapResult = results;
+                if (fixes.length) window.uiNotify('พบเซ็นเซอร์ที่ตั้งค่าไม่ตรงกับของจริง ดูรายละเอียดในแผง I2C Sensor Bus', 'warn');
+            }
+
+            if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => window.i2cReset());
+            else window.i2cReset();
+        })();
 
         function switchTab(tabId) {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -908,11 +1532,11 @@
             if(event && event.target && event.target.classList.contains('tab-btn')) event.target.classList.add('active');
             document.getElementById(tabId).classList.add('active');
             
-            // 🟢 บังคับให้ Chart.js โหลดใหม่เสมอเมื่อกดเข้าแท็บ เพื่อแก้บั๊กกราฟล่องหนเมื่อซ่อนไว้
+            // บังคับให้ Chart.js โหลดใหม่เสมอเมื่อกดเข้าแท็บ เพื่อแก้บั๊กกราฟล่องหนเมื่อซ่อนไว้
             if(tabId === 'tab-analytics') {
                 setTimeout(() => {
                     telemetryCharts.forEach(chart => { if(chart) chart.resize(); });
-                    window.redrawLiveCharts(true, !telemetryInterval);   // 🟢 [REC เสถียร] กำลังบันทึก = ช่วงล่าสุด, หยุดแล้ว = ทั้งหมด
+                    window.redrawLiveCharts(true, !telemetryInterval);   // [REC เสถียร] กำลังบันทึก = ช่วงล่าสุด, หยุดแล้ว = ทั้งหมด
                 }, 50);
             }
         }
@@ -930,8 +1554,8 @@
         function syncBlocksToCode() {
             let code = "";
             commandsData.forEach(cmd => {
-                if (cmd.type === 'MoveJ') code += `MOVEJ [${cmd.val.map(v=>Math.round(v)).join(', ')}]\n`;
-                else if (cmd.type === 'MoveL') code += `MOVEL [${cmd.val.map(v=>Math.round(v)).join(', ')}]\n`;
+                if (cmd.type === 'MoveJ') code += `MOVEJ [${cmd.val.map(v=>fmtDeg(v)).join(', ')}]\n`;
+                else if (cmd.type === 'MoveL') code += `MOVEL [${cmd.val.map(v=>Math.round(v)).join(', ')}]` + (cmd.ref ? ` [${cmd.ref.map(v=>Math.round(v)).join(', ')}]` : '') + `\n`;
                 else if (cmd.type === 'Wait') code += `WAIT ${cmd.val}\n`;
                 else if (cmd.type === 'Speed') code += `SPEED ${cmd.val}\n`;
                 else if (cmd.type === 'SetIO') code += `SET_IO PIN_${cmd.pin} ${cmd.state.toUpperCase()}\n`;
@@ -947,7 +1571,12 @@
                 let text = line.trim().toUpperCase();
                 if(!text || text.startsWith('//')) return;
                 if(text.startsWith('MOVEJ')) { let m = text.match(/\[(.*?)\]/); if(m) commandsData.push({ type: 'MoveJ', val: m[1].split(',').map(v => parseFloat(v)||0) }); } 
-                else if (text.startsWith('MOVEL')) { let m = text.match(/\[(.*?)\]/); if(m) commandsData.push({ type: 'MoveL', val: m[1].split(',').map(v => parseFloat(v)||0) }); } 
+                else if (text.startsWith('MOVEL')) {
+                    let m = [...text.matchAll(/\[(.*?)\]/g)];
+                    if(m.length) { let cmd = { type: 'MoveL', val: m[0][1].split(',').map(v => parseFloat(v)||0) };
+                        if(m.length > 1) { const r = m[1][1].split(',').map(v => parseFloat(v)||0); if(r.length === 6) cmd.ref = r; }   // ท่าที่บันทึกไว้ (ถ้ามี)
+                        commandsData.push(cmd); }
+                } 
                 else if (text.startsWith('WAIT')) commandsData.push({ type: 'Wait', val: parseFloat(text.replace('WAIT',''))||1 });
                 else if (text.startsWith('SPEED')) commandsData.push({ type: 'Speed', val: parseFloat(text.replace('SPEED',''))||50 });
                 else if (text.startsWith('SET_IO')) { let p = text.split(' '); commandsData.push({ type: 'SetIO', pin: p[1]?p[1].replace('PIN_',''):'1', state: p[2]==='ON'?'on':'off' }); }
@@ -960,7 +1589,8 @@
         function dropBlock(e) { e.preventDefault(); let target = e.target.closest('.robot-block'); let dropIndex = target ? parseInt(target.getAttribute('data-index')) : commandsData.length; if (draggedIndex === null || draggedIndex === dropIndex) return; let item = commandsData.splice(draggedIndex, 1)[0]; if (draggedIndex < dropIndex) dropIndex--; commandsData.splice(dropIndex, 0, item); renderBlocks(); }
 
         function updateBlockData(i, f, v) { 
-            if(f === 'MoveJ' || f === 'MoveL') { commandsData[i].val = v.split(',').map(x => Math.round(parseFloat(x)) || 0); }
+            if(f === 'MoveJ') { commandsData[i].val = v.split(',').map(x => r2(parseFloat(x)) || 0); }
+            else if(f === 'MoveL') { commandsData[i].val = v.split(',').map(x => Math.round(parseFloat(x)) || 0); }
             else if(f === 'pin') commandsData[i].pin = v; else if(f === 'state') commandsData[i].state = v; else commandsData[i].val = parseFloat(v) || 0; 
             saveToAutoSave(); 
         }
@@ -968,8 +1598,8 @@
         function addVisualBlock(type) { 
             let cmd = { type: type }; 
             if (type === 'Home') { cmd.type = 'MoveJ'; cmd.val = [0, 0, 0, 0, 0, 0]; }
-            else if (type === 'MoveJ') cmd.val = [...jointTargets]; 
-            else if (type === 'MoveL') { cmd.val = [Math.round(tcpPos.x), Math.round(tcpPos.y), Math.round(tcpPos.z)]; }
+            else if (type === 'MoveJ') cmd.val = jointTargets.map(r2);   // บันทึกท่าจริงละเอียด 0.01 องศา
+            else if (type === 'MoveL') { cmd.ref = jointTargets.map(v => Math.round(Number(v))); cmd.val = modelFK(cmd.ref).map(v => Math.round(v)); }
             else if (type === 'Wait') cmd.val = 1.0; else if (type === 'Speed') cmd.val = 50; 
             else if (type === 'SetIO') { cmd.pin = '1'; cmd.state = 'on'; } 
             else if (type === 'Loop') cmd.val = 3; 
@@ -989,9 +1619,12 @@
             commandsData.forEach((cmd, idx) => {
                 let b = document.createElement('div'); b.className = `robot-block block-${cmd.type.toLowerCase()}`; b.setAttribute('draggable', 'true'); b.setAttribute('data-index', idx); b.ondragstart = (e) => dragStart(e, idx);
                 b.oncontextmenu = (e) => toggleBlockType(e, idx); 
+                // [แก้ช่องพิมพ์ในบล็อก] กดที่ช่องตัวเลข/ปุ่ม จะไม่เริ่มลากบล็อก จึงคลิกวางเคอร์เซอร์และเลือกข้อความแก้ได้
+                b.addEventListener('mousedown', (e) => { b.draggable = !e.target.closest('input, select, button'); });
+                b.addEventListener('mouseup', () => { b.draggable = true; });
 
                 let c = "";
-                if (cmd.type === 'MoveJ') c = `MoveJ (องศา) <input class="block-input" style="width:100px" value="${cmd.val.map(v=>Math.round(v)).join(', ')}" onchange="updateBlockData(${idx},'MoveJ',this.value)">`;
+                if (cmd.type === 'MoveJ') c = `MoveJ (องศา) <input class="block-input" style="width:170px" value="${cmd.val.map(v=>fmtDeg(v)).join(', ')}" onchange="updateBlockData(${idx},'MoveJ',this.value)">`;
                 else if (cmd.type === 'MoveL') c = `MoveL (X,Y,Z) <input class="block-input" style="width:100px" value="${cmd.val.map(v=>Math.round(v)).join(', ')}" onchange="updateBlockData(${idx},'MoveL',this.value)">`;
                 else if (cmd.type === 'Wait') c = `Wait <input type="text" class="block-input" style="width:40px" value="${cmd.val}" onchange="updateBlockData(${idx},'val',this.value)"> S`;
                 else if (cmd.type === 'Speed') c = `Speed <input type="text" class="block-input" style="width:40px" value="${cmd.val}" onchange="updateBlockData(${idx},'val',this.value)"> %`;
@@ -1006,7 +1639,7 @@
 
         const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-        // 🟢 [REC เสถียร] ต่อ Arduino อยู่: รอจนมุมจริงของทุกแกน (ค่า LIVE ที่ Arduino ส่งกลับ) ถึงเป้าหมาย
+        // [REC เสถียร] ต่อ Arduino อยู่: รอจนมุมจริงของทุกแกน (ค่า LIVE ที่ Arduino ส่งกลับ) ถึงเป้าหมาย
         //    ไม่ได้ต่อ (โหมดจำลอง): ไม่ต้องรอ เพราะหุ่น 3D วิ่งตามเส้น Target อยู่แล้ว (เหมือนเดิม)
         //    เผื่อเวลาไว้ ถ้าเกินกำหนดจะทำคำสั่งถัดไปต่อ (เหมือนพฤติกรรมเดิม) และเตือนไว้ใน Console
         async function waitForArmArrival(endJoints, travelTimeMs) {
@@ -1016,46 +1649,57 @@
                 let arrived = true;
                 for (let j = 0; j < 6; j++) {
                     if (freedriveModes[j]) continue;
-                    let act = window.robot ? (window.robot.joints[j].rotation.z * 180 / Math.PI) - visualOffsets[j] : Math.round(endJoints[j]);
-                    if (Math.abs(act - Math.round(endJoints[j])) > 0.5) { arrived = false; break; }
+                    const lv = window.lastLive && window.lastLive[j];
+                    let act = Number.isFinite(lv) ? lv : (window.robot ? (window.robot.joints[j].rotation.z * 180 / Math.PI) - visualOffsets[j] : r2(endJoints[j]));
+                    // เฟิร์มแวร์ใหม่ส่ง LIVE ละเอียด 0.01 องศา จึงรอจนถึงจริง (คลาดไม่เกิน 0.05) / เฟิร์มแวร์เก่าส่งองศาเต็ม ใช้ 0.5 เหมือนเดิม
+                    const tol = window.liveHasDecimals ? 0.05 : 0.5;
+                    if (Math.abs(act - r2(endJoints[j])) > tol) { arrived = false; break; }
                 }
                 if (arrived) return true;
-                if (performance.now() > deadline) { console.warn('⚠️ แขนยังไม่ถึงเป้าหมายภายในเวลาที่เผื่อไว้ จึงทำคำสั่งถัดไปต่อ'); return false; }
+                if (performance.now() > deadline) { console.warn('แขนยังไม่ถึงเป้าหมายภายในเวลาที่เผื่อไว้ จึงทำคำสั่งถัดไปต่อ'); return false; }
                 await sleep(20);
             }
             return false;
         }
         function checkSelfCollision(joints) { return joints[2] < -50; }
-        // 🟢 ขอบเขตมุมของแต่ละข้อต่อ (องศา) ให้ตรงกับตารางขอบเขตในเล่มและ jointMinDeg/jointMaxDeg ในเฟิร์มแวร์
+        // ขอบเขตมุมของแต่ละข้อต่อ (องศา) ให้ตรงกับตารางขอบเขตในเล่มและ jointMinDeg/jointMaxDeg ในเฟิร์มแวร์
         const JOINT_LIMITS = [[-75, 75], [-60, 60], [-60, 60], [-180, 180], [-180, 180], [-180, 180]];
         function limitViolation(joints) {
             for (let i = 0; i < 6; i++) { const v = Number(joints[i]); if (isNaN(v) || v < JOINT_LIMITS[i][0] || v > JOINT_LIMITS[i][1]) return i; }
             return -1;
         }
+        // เหตุผลที่สั่งแกนนี้ด้วยมือไม่ได้ (คืนค่า '' ถ้าสั่งได้)
+        function manualBlockReason(i) {
+            if (isProgramRunning) return 'โปรแกรมกำลังทำงานอยู่ กด Stop Program ก่อนจึงจะขยับแกนเองได้';
+            if (freedriveModes[i]) return 'แกน J' + (i + 1) + ' ปลดล็อก (Free) อยู่ ล็อกแกนก่อนจึงจะสั่งด้วยโปรแกรมได้';
+            return '';
+        }
+        const COLLISION_MSG = 'ตำแหน่งนี้ทำให้แขนชนตัวเอง (J3 ต่ำกว่า -50 องศา) จึงไม่ขยับ';
         function showBlockWarning(index) {
             let targetInput = document.getElementById('target'+(index+1));
             if(targetInput) { 
                 let oldBg = targetInput.style.backgroundColor; targetInput.style.backgroundColor = "#ffcccc"; 
-                setTimeout(() => { targetInput.style.backgroundColor = oldBg; targetInput.value = Math.round(jointTargets[index]); }, 800); 
+                setTimeout(() => { targetInput.style.backgroundColor = oldBg; targetInput.value = fmtDeg(jointTargets[index]); }, 800); 
             }
         }
 
         for(let i=0; i<6; i++) {
             let slider = document.getElementById('joint'+(i+1)); let valDisplay = document.getElementById('val'+(i+1)); let targetInput = document.getElementById('target'+(i+1));
             slider.addEventListener('input', function() {
-                if(isProgramRunning || freedriveModes[i]) return; 
+                { const why = manualBlockReason(i); if (why) { this.value = Math.round(uiGraphTargets[i]); window.notifyBlocked(why); return; } }
                 let d = Math.round(Number(this.value)); let tempJoints = jointTargets.slice(); tempJoints[i] = d;
-                if(checkSelfCollision(tempJoints)) { this.value = jointTargets[i]; showBlockWarning(i); return; }
+                if(checkSelfCollision(tempJoints)) { this.value = jointTargets[i]; showBlockWarning(i); window.notifyBlocked(COLLISION_MSG); return; }
                 jointTargets[i] = d; targetInput.value = d; uiGraphTargets[i] = d;
                 if(!window.robotLink || !window.robotLink.serialWriter) valDisplay.innerText = d + '°';
                 if(window.robotLink) window.robotLink.sendJointsData(); 
             });
             targetInput.addEventListener('change', function() {
-                if(isProgramRunning || freedriveModes[i]) return;  
-                let d = Math.round(Number(this.value)); if(isNaN(d)) d = jointTargets[i]; 
+                { const why = manualBlockReason(i); if (why) { this.value = fmtDeg(uiGraphTargets[i]); window.notifyBlocked(why); return; } }
+                let d = r2(Number(this.value)); if(isNaN(d)) d = jointTargets[i];   // พิมพ์ทศนิยมได้ (ละเอียด 0.01 องศา)
+                if(d < Number(slider.min) || d > Number(slider.max)) window.uiNotify('J' + (i+1) + ' ตั้งได้ ' + slider.min + ' ถึง ' + slider.max + ' องศา จึงปรับเป็น ' + Math.max(Number(slider.min), Math.min(Number(slider.max), d)) + ' องศา', 'warn');
                 d = Math.max(Number(slider.min), Math.min(Number(slider.max), d)); let tempJoints = jointTargets.slice(); tempJoints[i] = d;
-                if(checkSelfCollision(tempJoints)) { this.value = jointTargets[i]; showBlockWarning(i); return; }
-                jointTargets[i] = d; this.value = d; slider.value = d; uiGraphTargets[i] = d; 
+                if(checkSelfCollision(tempJoints)) { this.value = jointTargets[i]; showBlockWarning(i); window.notifyBlocked(COLLISION_MSG); return; }
+                jointTargets[i] = d; this.value = fmtDeg(d); slider.value = Math.round(d); uiGraphTargets[i] = d; 
                 if(!window.robotLink || !window.robotLink.serialWriter) valDisplay.innerText = d + '°';
                 if(window.robotLink) window.robotLink.sendJointsData();
             });
@@ -1064,33 +1708,65 @@
 
         let jogTimeout = null; let jogInterval = null;
         window.jogJoint = function(j, dir) {
-            if(isProgramRunning || freedriveModes[j-1]) return; 
-            let i = j - 1; let st = Math.round(Number(document.getElementById('jog-step').value)) || 1;
-            let sl = document.getElementById('joint'+j); let nVal = Math.max(Number(sl.min), Math.min(Number(sl.max), jointTargets[i] + (dir * st)));
+            { const why = manualBlockReason(j-1); if (why) { window.stopJog(); return window.notifyBlocked(why); } }
+            let i = j - 1; let st = r2(Math.abs(Number(document.getElementById('jog-step').value))) || 1;   // ระยะ Jog ใส่ทศนิยมได้ เช่น 0.1
+            let sl = document.getElementById('joint'+j); let nVal = r2(Math.max(Number(sl.min), Math.min(Number(sl.max), jointTargets[i] + (dir * st))));
+            if(nVal === jointTargets[i] && st > 0) { window.stopJog(); return window.notifyBlocked('J' + j + ' ถึงขอบเขตแล้ว (' + sl.min + ' ถึง ' + sl.max + ' องศา)'); }
             let tempJoints = jointTargets.slice(); tempJoints[i] = nVal;
-            if(checkSelfCollision(tempJoints)) { showBlockWarning(i); return; }
-            jointTargets[i] = nVal; sl.value = nVal; document.getElementById('target'+j).value = nVal; uiGraphTargets[i] = nVal;
-            if(!window.robotLink || !window.robotLink.serialWriter) document.getElementById('val'+j).innerText = nVal + '°';
+            if(checkSelfCollision(tempJoints)) { window.stopJog(); showBlockWarning(i); return window.notifyBlocked(COLLISION_MSG); }
+            jointTargets[i] = nVal; sl.value = Math.round(nVal); document.getElementById('target'+j).value = fmtDeg(nVal); uiGraphTargets[i] = nVal;
+            if(!window.robotLink || !window.robotLink.serialWriter) document.getElementById('val'+j).innerText = fmtDeg(nVal) + '°';
             if(window.robotLink) window.robotLink.sendJointsData();
         }
-        window.startJog = function(j, dir) { if (isProgramRunning || freedriveModes[j-1]) return; jogJoint(j, dir); jogTimeout = setTimeout(() => { jogInterval = setInterval(() => { jogJoint(j, dir); }, 50); }, 400); };
+        window.startJog = function(j, dir) { if (manualBlockReason(j-1)) return jogJoint(j, dir); jogJoint(j, dir); jogTimeout = setTimeout(() => { jogInterval = setInterval(() => { jogJoint(j, dir); }, 50); }, 400); };
         window.stopJog = function() { clearTimeout(jogTimeout); clearInterval(jogInterval); };
 
-        window.setCurrentAsHome = async function() { 
-            if(cdsOwnsArm) return alert("⚠️ CODESYS เป็นผู้ควบคุมอยู่ กรุณากด 'ขอสิทธิ์ให้หน้านี้' ก่อนครับ");   // 🔵 [CODESYS]
-            if(window.robotLink && window.robotLink.serialWriter) { try { await window.robotLink.serialWriter.write("home\n"); } catch(e) {} }
-            for(let i=0; i<6; i++) {
-                if(freedriveModes[i]) continue;
-                jointTargets[i] = 0; uiGraphTargets[i] = 0; document.getElementById('joint'+(i+1)).value = 0; 
-                document.getElementById('val'+(i+1)).innerText = '0°'; document.getElementById('target'+(i+1)).value = 0;
-                if(window.robot) window.robot.joints[i].rotation.z = visualOffsets[i] * Math.PI / 180;
+        window.setCurrentAsHome = async function() {
+            if(cdsOwnsArm) return window.notifyBlocked("CODESYS เป็นผู้ควบคุมอยู่ กรุณากด 'ขอสิทธิ์ให้หน้านี้' ก่อนครับ");   // [CODESYS]
+            if(isProgramRunning) return window.notifyBlocked("โปรแกรมกำลังทำงานอยู่ กด Stop Program ก่อนจึงจะตั้ง Home ได้");
+            const zeroUi = () => {
+                for(let i=0; i<6; i++) {
+                    if(freedriveModes[i]) continue;
+                    jointTargets[i] = 0; uiGraphTargets[i] = 0; document.getElementById('joint'+(i+1)).value = 0;
+                    document.getElementById('val'+(i+1)).innerText = '0°'; document.getElementById('target'+(i+1)).value = 0;
+                    if(window.robot) window.robot.joints[i].rotation.z = visualOffsets[i] * Math.PI / 180;
+                }
+                if(window.updateTCP) window.updateTCP();
+                homeA = [0, 0, 0, 0, 0, 0];
+            };
+            const link = window.robotLink;
+            if(!(link && link.serialWriter)) {   // โหมดจำลอง (ไม่ได้ต่อ Arduino)
+                zeroUi();
+                return window.uiNotify("ยังไม่ได้เชื่อมต่อ Arduino จึงตั้งศูนย์เฉพาะแบบจำลองบนหน้าจอ", 'info');
             }
-            if(window.updateTCP) window.updateTCP(); 
-            homeA = [0, 0, 0, 0, 0, 0]; alert("✅ Calibrate สำเร็จ! ตำแหน่งปัจจุบันถูกตั้งเป็นศูนย์แล้ว"); 
+            // ส่ง HOME แล้วรอ Arduino ตอบ HOME:OK (ล้างค่าเก่าและบันทึกค่าใหม่ลง EEPROM แล้ว) หรือ HOME:FAIL,<สาเหตุ>
+            const btn = document.getElementById('btn-set-home'); if(btn) btn.disabled = true;
+            let reply;
+            try {
+                reply = await new Promise(resolve => {
+                    const timer = setTimeout(() => { link.homeWaiter = null; resolve('TIMEOUT'); }, 4000);
+                    link.homeWaiter = (r) => { clearTimeout(timer); link.homeWaiter = null; resolve(r); };
+                    link.serialWriter.write("HOME\n").catch(() => { clearTimeout(timer); link.homeWaiter = null; resolve('WRITE'); });
+                });
+            } finally { if(btn) btn.disabled = cdsOwnsArm; }
+            if(reply === 'OK') {
+                zeroUi();
+                window.uiNotify("ตั้งตำแหน่งปัจจุบันเป็น Home แล้ว\nล้างค่าเดิมและบันทึกค่าใหม่ลง EEPROM เรียบร้อย", 'ok');
+                return;
+            }
+            const why = {
+                BUSY: 'แขนยังเคลื่อนที่อยู่ รอให้หยุดก่อนแล้วกดใหม่',
+                EEPROM: 'เขียน EEPROM แล้วอ่านกลับไม่ตรงกัน',
+                TIMEOUT: 'Arduino ไม่ตอบกลับภายใน 4 วินาที (ตรวจว่าอัปโหลดเฟิร์มแวร์รุ่นใหม่แล้ว)',
+                WRITE: 'ส่งคำสั่งไปยัง Arduino ไม่ได้'
+            };
+            let m = why[reply] || (reply.startsWith('SENSOR') ? 'อ่านเซ็นเซอร์ไม่ได้ (' + reply.substring(6).trim() + ')' : reply);
+            window.notifyBlocked("ตั้ง Home ไม่สำเร็จ: " + m + "\nค่า Home เดิมยังอยู่ ไม่ถูกเปลี่ยน");
         }
 
         window.goHome = function() { 
-            if(isProgramRunning || cdsOwnsArm) return;   // 🔵 [CODESYS]
+            if(cdsOwnsArm) return window.notifyBlocked("CODESYS เป็นผู้ควบคุมอยู่ กรุณากด 'ขอสิทธิ์ให้หน้านี้' ก่อนครับ");   // [CODESYS]
+            if(isProgramRunning) return window.notifyBlocked("โปรแกรมกำลังทำงานอยู่ กด Stop Program ก่อนจึงจะสั่ง Move to Home ได้");
             for(let i=0; i<6; i++) {
                 if(freedriveModes[i]) continue;
                 jointTargets[i] = homeA[i]; uiGraphTargets[i] = homeA[i];
@@ -1100,22 +1776,156 @@
             if(window.robotLink) window.robotLink.sendJointsData();
         }
 
-        function solveIK(x, y, z, currentJoints) {
-            // 🟢 L3 = ระยะจากแกน J3 ถึงจุด TCP ของแบบจำลองสามมิติ (ตำแหน่งที่แสดงบนหน้าจอ) เมื่อข้อมือเหยียดตรง
-            //    แกน Y บนหน้าจอมีทิศตรงข้ามกับทิศบวกของ J1 จึงใช้ J1 = -atan2(y, x)
-            const d1 = 169.77, a1 = 64.2, a2 = 305.0, L3 = 248.0; let targetJoints = [0, 0, 0, 0, 0, 0]; let j1 = 0;
-            if (Math.abs(x) > 0.001 || Math.abs(y) > 0.001) { j1 = -Math.atan2(y, x); } else if (currentJoints) { j1 = currentJoints[0] * (Math.PI / 180); }
-            let r = Math.sqrt(x*x + y*y) - a1; let s = z - d1; let D = (r*r + s*s - a2*a2 - L3*L3) / (2 * a2 * L3);
-            if (isNaN(D) || D > 1.0001 || D < -1.0001) { console.warn(`⚠️ พิกัด X:${Math.round(x)}, Y:${Math.round(y)}, Z:${Math.round(z)} อยู่นอกระยะการทำงาน`); return currentJoints || jointTargets; }
-            D = Math.max(-1, Math.min(1, D));
-            let j3_rad = Math.atan2(-Math.sqrt(1 - D*D), D); let j2_rad = Math.atan2(s, r) - Math.atan2(L3 * Math.sin(j3_rad), a2 + L3 * Math.cos(j3_rad));
-            targetJoints[0] = j1 * (180 / Math.PI); targetJoints[1] = 90 - (j2_rad * (180 / Math.PI)); targetJoints[2] = j3_rad * (180 / Math.PI) + 90; /* J3 = 0 เมื่อแขนท่อนล่างตั้งฉากกับท่อนบน */ 
-            if (currentJoints) {
-                targetJoints[3] = currentJoints[3]; targetJoints[5] = currentJoints[5]; 
-                let currentPitch = currentJoints[1] + currentJoints[2] + currentJoints[4]; targetJoints[4] = currentPitch - (targetJoints[1] + targetJoints[2]);
-            } else { targetJoints[3] = 0; targetJoints[4] = -(targetJoints[1] + targetJoints[2]); targetJoints[5] = 0; }
-            for(let i=0; i<6; i++) { if(isNaN(targetJoints[i])) return currentJoints || jointTargets; }
-            return targetJoints;
+        // ==========================================
+        // จลนศาสตร์สำหรับ MoveL (คำนวณจากโมเดล 3D ชุดเดียวกับที่แสดงบนจอ)
+        // ==========================================
+        // modelFK(q): ตำแหน่ง TCP [x, y, z] (มม.) ของมุมข้อต่อ q (องศา) ตรงกับค่า TCP ที่แสดงบนจอ
+        //   ประกอบเมทริกซ์จากค่าคงที่ชุดเดียวกับที่ใช้สร้างโมเดล (stls, vops, FLIP_JOINT, MIRROR_ARM)
+        //   จึงรวมระยะ 25 มม. จากแกน J5 ถึงจุด TCP และระยะเยื้องด้านข้างของแขนไว้ครบ
+        const M4_I = [1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1];
+        const M4_MIRROR_Y = [1,0,0,0, 0,-1,0,0, 0,0,1,0, 0,0,0,1];
+        const WRIST_PITCH = 3, FOREARM_ROLL = 4;   // J4 = ข้อมือก้มเงย, J5 = หมุนแขนท่อนปลาย (ดู AXIS_LINKS)
+        function m4Mul(a, b) {
+            const r = new Array(16);
+            for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) {
+                r[i*4+j] = a[i*4]*b[j] + a[i*4+1]*b[4+j] + a[i*4+2]*b[8+j] + a[i*4+3]*b[12+j];
+            }
+            return r;
+        }
+        function m4Op(type, v, y, z) {
+            if (type === 't') return [1,0,0,v, 0,1,0,y, 0,0,1,z, 0,0,0,1];
+            const ang = v * Math.PI / 180, c = Math.cos(ang), sn = Math.sin(ang);
+            if (type === 'rx') return [1,0,0,0, 0,c,-sn,0, 0,sn,c,0, 0,0,0,1];
+            if (type === 'ry') return [c,0,sn,0, 0,1,0,0, -sn,0,c,0, 0,0,0,1];
+            return [c,-sn,0,0, sn,c,0,0, 0,0,1,0, 0,0,0,1];   // rz
+        }
+        let kinBaseCache = null;
+        function modelFK(q) {
+            if (!kinBaseCache) {
+                kinBaseCache = {};
+                stls.forEach(n => {
+                    let M = M4_I;
+                    vops[n].forEach(op => { M = m4Mul(M, op.type === 't' ? m4Op('t', op.x, op.y, op.z) : m4Op(op.type, op.val)); });
+                    kinBaseCache[n] = M;
+                });
+            }
+            let W = M4_I;
+            for (const n of stls) {
+                if (MIRROR_ARM && n === "Link 1-1.STL") W = m4Mul(W, M4_MIRROR_Y);
+                W = m4Mul(W, kinBaseCache[n]);
+                const ji = AXIS_LINKS.indexOf(n);
+                const th = ji >= 0 ? Number(q[ji]) + visualOffsets[ji] : 0;
+                if (FLIP_JOINT[n]) W = m4Mul(W, m4Op('rx', 180));
+                W = m4Mul(W, m4Op('rz', th));
+                if (n === "Link 6-1.STL") return [W[3], W[7], W[11]];
+                if (FLIP_JOINT[n]) W = m4Mul(W, m4Op('rx', 180));
+            }
+        }
+        function solve4(A, b) {   // แก้ระบบสมการ 4x4 (Gaussian elimination)
+            const n = 4, M = A.map((row, i) => [...row, b[i]]);
+            for (let c = 0; c < n; c++) {
+                let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+                if (Math.abs(M[piv][c]) < 1e-9) return null;
+                [M[c], M[piv]] = [M[piv], M[c]];
+                for (let r = c + 1; r < n; r++) { const k = M[r][c] / M[c][c]; for (let j = c; j <= n; j++) M[r][j] -= k * M[c][j]; }
+            }
+            const x = new Array(n);
+            for (let r = n - 1; r >= 0; r--) { let sum = M[r][n]; for (let j = r + 1; j < n; j++) sum -= M[r][j] * x[j]; x[r] = sum / M[r][r]; }
+            return x;
+        }
+        // movelIK: หามุมข้อต่อที่ทำให้ TCP อยู่ที่จุด P โดยกำหนด J5 (หมุนแขนท่อนปลาย), J6 และมุมก้มเงยของปลายมือ (J2 - J3 - J4)
+        //   (ในโมเดลนี้ J2 + 1° กับ J3 + 1° หักล้างกัน ปลายมือจึงคงมุมเมื่อ J2 - J3 - J4 คงที่)
+        //   แก้ 4 ตัวแปร (J1, J2, J3, J4) ด้วยวิธีนิวตัน เริ่มจากคำตอบของจุดก่อนหน้า คืน null ถ้าหาคำตอบไม่ได้
+        const MOVEL_VARS = [0, 1, 2, WRIST_PITCH];
+        const wristPitchOf = (q) => q[1] - q[2] - q[WRIST_PITCH];
+        function movelIK(P, guess, roll, j6, pitch) {
+            let q = guess.map(Number); q[FOREARM_ROLL] = roll; q[5] = j6;
+            const resid = (qq) => { const p = modelFK(qq); return [p[0] - P[0], p[1] - P[1], p[2] - P[2], wristPitchOf(qq) - pitch]; };
+            for (let it = 0; it < 40; it++) {
+                const f = resid(q);
+                if (Math.hypot(f[0], f[1], f[2]) < 0.002 && Math.abs(f[3]) < 1e-4) return q;
+                const J = [[], [], [], []], h = 1e-3;
+                for (let c = 0; c < 4; c++) {
+                    const dq = q.slice(); dq[MOVEL_VARS[c]] += h; const fd = resid(dq);
+                    for (let r = 0; r < 4; r++) J[r][c] = (fd[r] - f[r]) / h;
+                }
+                const dx = solve4(J, f.map(v => -v)); if (!dx) return null;
+                const mx = Math.max(...dx.map(Math.abs)); const sc = mx > 10 ? 10 / mx : 1;   // ก้าวละไม่เกิน 10 องศา
+                for (let c = 0; c < 4; c++) q[MOVEL_VARS[c]] += dx[c] * sc;
+            }
+            return null;
+        }
+        // วางแผน MoveL ทั้งเส้นก่อนเริ่มขยับ: แบ่งเส้นตรงทุก 1 มม. แล้วหามุมข้อต่อทุกจุด
+        //   ref (ถ้ามี) = ท่าที่บันทึกไว้ของจุดปลายทาง: J5, J6 และมุมปลายมือจะค่อย ๆ เปลี่ยนจากท่าเริ่มต้นไปเท่าท่านี้
+        //     จึงจบที่ท่าเดียวกับ MoveJ ไปจุดเดียวกัน   ไม่มี ref = คงมุมปลายมือและ J5, J6 ของท่าเริ่มต้นตลอดทาง
+        //   checks = true: ตรวจขอบเขต การชน และมุมที่กระโดดผิดปกติ ถ้าไม่ผ่านจะไม่ขยับเลย
+        function planMoveL(startJoints, target, checks = true, ref = null) {
+            const q0 = startJoints.map(Number);
+            const S = modelFK(q0);
+            const L = Math.hypot(target[0] - S[0], target[1] - S[1], target[2] - S[2]);
+            const n = Math.max(1, Math.ceil(L / 1.0));
+            const p0 = wristPitchOf(q0);
+            const e = ref ? ref.map(Number) : q0;
+            const p1 = wristPitchOf(e);
+            const samples = [{ s: 0, q: q0.slice() }]; let q = q0.slice();
+            for (let i = 1; i <= n; i++) {
+                const f = i / n;
+                const P = [S[0] + (target[0] - S[0]) * f, S[1] + (target[1] - S[1]) * f, S[2] + (target[2] - S[2]) * f];
+                const sol = movelIK(P, q, q0[FOREARM_ROLL] + (e[FOREARM_ROLL] - q0[FOREARM_ROLL]) * f, q0[5] + (e[5] - q0[5]) * f, p0 + (p1 - p0) * f);
+                if (!sol) return { error: `MoveL: จุด X:${Math.round(P[0])} Y:${Math.round(P[1])} Z:${Math.round(P[2])} อยู่นอกระยะที่แขนเอื้อมถึง จึงไม่ขยับ` };
+                if (checks) {
+                    const bad = limitViolation(sol);
+                    if (bad >= 0) return { error: `MoveL: ระหว่างทาง J${bad + 1} = ${sol[bad].toFixed(1)}° เกินขอบเขต (${JOINT_LIMITS[bad][0]} ถึง ${JOINT_LIMITS[bad][1]}) จึงไม่ขยับ` };
+                    if (checkSelfCollision(sol)) return { error: 'MoveL: ระหว่างทางแขนจะชนตัวเอง (J3 ต่ำกว่า -50 องศา) จึงไม่ขยับ' };
+                    let wristStep = 0; if (ref) for (const k of [FOREARM_ROLL, 5]) wristStep = Math.max(wristStep, Math.abs(e[k] - q0[k]) / n);
+                    const jump = Math.max(...sol.map((v, k) => Math.abs(v - q[k])));
+                    if (jump > 5 + wristStep) return { error: `MoveL: มุมข้อต่อเปลี่ยน ${jump.toFixed(1)}° ในช่วง 1 มม. (ท่าใกล้จุดเอกฐาน) จึงไม่ขยับ` };
+                }
+                samples.push({ s: L * f, q: sol }); q = sol;
+            }
+            if (checks && ref && Math.max(...q.map((v, k) => Math.abs(v - e[k]))) > 1.0 &&
+                Math.hypot(...modelFK(e).map((v, k) => v - target[k])) < 1.0) {
+                return { error: 'MoveL: เส้นตรงจากท่าปัจจุบันไปจุดนี้จะจบด้วยรูปแบบแขนต่างจากท่าที่บันทึกไว้ ใช้ MoveJ ไปจุดนี้แทน' };
+            }
+            return { samples: samples, L: L, end: q };
+        }
+        // มุมข้อต่อที่ระยะ s (มม.) ตามเส้นทาง (เทียบเชิงเส้นระหว่างจุดที่ห่างกัน 1 มม.)
+        function moveLJointsAt(plan, s) {
+            const sm = plan.samples; if (s <= 0) return sm[0].q.slice(); if (s >= plan.L) return sm[sm.length - 1].q.slice();
+            const i = Math.min(sm.length - 2, Math.floor(s / plan.L * (sm.length - 1)));
+            const a = sm[i], b = sm[i + 1], f = (s - a.s) / Math.max(1e-9, b.s - a.s);
+            return a.q.map((v, k) => v + (b.q[k] - v) * f);
+        }
+        // แผนเวลา: ความเร็วปลายแขนแบบสี่เหลี่ยมคางหมู (เร่งขึ้น - คงที่ - ผ่อนลง) แล้วแบ่งเป็นช่วงละ MOVEL_DT ms
+        //   ความเร็วคงที่ = 0.8 x ค่าความเร็ว% มม./วินาที (50% = 40 มม./วินาที เท่าเดิม)
+        //   ถ้ามีแกนใดต้องหมุนเร็วเกินค่าความเร็วที่ตั้งไว้ จะลดความเร็วปลายแขนลงให้ทุกแกนทำได้จริง
+        const MOVEL_DT = 40, MOVEL_ACC_S = 0.3;
+        function buildMoveLTrajectory(plan, speedPct) {
+            const stepsPerSec = 100 + ((speedPct - 1) * (2900 / 99));
+            let v = 0.8 * speedPct;                                     // มม./วินาที
+            let stepsPerMm = 0; const sm = plan.samples;
+            for (let i = 1; i < sm.length; i++) {
+                const ds = Math.max(1e-6, sm[i].s - sm[i - 1].s);
+                for (let j = 0; j < 6; j++) stepsPerMm = Math.max(stepsPerMm, Math.abs(sm[i].q[j] - sm[i - 1].q[j]) * STEPS_PER_DEGREE[j] / ds);
+            }
+            if (stepsPerMm > 0) v = Math.min(v, 0.9 * stepsPerSec / stepsPerMm);
+            const L = plan.L, a = v / MOVEL_ACC_S;
+            let ta, T;
+            if (L >= v * MOVEL_ACC_S) { ta = MOVEL_ACC_S; T = L / v + ta; }
+            else { v = Math.sqrt(L * a); ta = v / a; T = 2 * ta; }
+            const sAt = (t) => {
+                if (t <= 0) return 0; if (t >= T) return L;
+                if (t < ta) return 0.5 * a * t * t;
+                if (t > T - ta) { const r = T - t; return L - 0.5 * a * r * r; }
+                return 0.5 * a * ta * ta + v * (t - ta);
+            };
+            const segs = []; const N = Math.max(1, Math.ceil(T * 1000 / MOVEL_DT));
+            for (let k = 1; k <= N; k++) {
+                const t1 = Math.min(T, k * MOVEL_DT / 1000);
+                const ms = Math.round((t1 - (k - 1) * MOVEL_DT / 1000) * 1000);
+                segs.push({ q: moveLJointsAt(plan, sAt(t1)), ms: Math.max(1, ms) });
+            }
+            return { segs: segs, T: T, v: v };
         }
 
         const DH_PARAMS = [
@@ -1137,43 +1947,53 @@
         window.toggleBlockType = function(e, index) {
             e.preventDefault(); let cmd = commandsData[index];
             if (cmd.type === 'MoveJ') {
-                cmd.type = 'MoveL'; let backupRots = [];
-                for(let i=0; i<6; i++) { backupRots[i] = window.robot.joints[i].rotation.z; window.robot.joints[i].rotation.z = (cmd.val[i] + visualOffsets[i]) * Math.PI / 180; }
-                window.robot.root.updateMatrixWorld(true); let tempTcp = new THREE.Vector3(); window.robot.joints[5].getWorldPosition(tempTcp);
-                for(let i=0; i<6; i++) { window.robot.joints[i].rotation.z = backupRots[i]; } window.robot.root.updateMatrixWorld(true);
-                cmd.val = [Math.round(tempTcp.x), Math.round(tempTcp.y), Math.round(tempTcp.z)];
-            } else if (cmd.type === 'MoveL') { cmd.type = 'MoveJ'; cmd.val = [...jointTargets]; }
+                // มุมข้อต่อ -> ตำแหน่ง TCP และเก็บท่าเดิมไว้ใน ref (ใช้กำหนดท่าปลายมือ และแปลงกลับได้ค่าเดิม)
+                const ref = cmd.val.map(Number);
+                cmd.type = 'MoveL'; cmd.ref = ref; cmd.val = modelFK(ref).map(v => Math.round(v));
+            } else if (cmd.type === 'MoveL') {
+                const target = cmd.val.map(Number);
+                let q = null;
+                if (cmd.ref && Math.hypot(...modelFK(cmd.ref).map((v, k) => v - target[k])) <= 1.0) {
+                    q = cmd.ref.map(v => Math.round(v));                 // จุดยังไม่ถูกแก้: ได้ท่าเดิมทุกแกน
+                } else {
+                    // จุดที่พิมพ์เองหรือแก้แล้ว: คำนวณต่อเนื่องจากท่าที่บันทึกไว้ (ถ้ามี) หรือท่าปัจจุบัน
+                    const plan = planMoveL(cmd.ref ? cmd.ref.slice() : jointTargets.slice(), target, false, cmd.ref || null);
+                    if (plan.error) return window.notifyBlocked('แปลงเป็น MoveJ ไม่ได้: ' + plan.error.replace(/^MoveL: /, ''));
+                    q = plan.end.map(v => Math.round(v));
+                }
+                const bad = limitViolation(q);
+                if (bad >= 0) return window.notifyBlocked(`แปลงเป็น MoveJ ไม่ได้: J${bad + 1} = ${q[bad]}° เกินขอบเขต (${JOINT_LIMITS[bad][0]} ถึง ${JOINT_LIMITS[bad][1]})`);
+                cmd.type = 'MoveJ'; cmd.val = q; delete cmd.ref;
+            }
             renderBlocks(); 
         }
 
-        async function executeMoveL(targetX, targetY, targetZ) {
-            let startX = tcpPos.x || 0; let startY = tcpPos.y || 0; let startZ = tcpPos.z || 0;
-            let distance = Math.sqrt(Math.pow(targetX-startX, 2) + Math.pow(targetY-startY, 2) + Math.pow(targetZ-startZ, 2));
-            let steps = Math.max(1, Math.floor(distance / 2.0)); let initialJoints = [...jointTargets]; 
-            for (let i = 1; i <= steps; i++) {
-                if(!isProgramRunning) break; let t = i / steps;
-                let currentX = startX + (targetX - startX) * t; let currentY = startY + (targetY - startY) * t; let currentZ = startZ + (targetZ - startZ) * t;
-                let calculatedJoints = solveIK(currentX, currentY, currentZ, initialJoints);
-                // 🟢 กันแขนสะบัด: หยุด MoveL ถ้ามุมเกินขอบเขต ชนตัวเอง หรือเปลี่ยนเกิน 10° ในช่วงเดียว (2 มม.)
-                { const bad = limitViolation(calculatedJoints); let jump = 0;
-                  for (let j = 0; j < 6; j++) { if (!freedriveModes[j]) jump = Math.max(jump, Math.abs(calculatedJoints[j] - jointTargets[j])); }
-                  if (bad >= 0 || checkSelfCollision(calculatedJoints) || jump > 10) {
-                      isProgramRunning = false;
-                      alert(bad >= 0 ? `⚠️ MoveL: J${bad+1} = ${Math.round(calculatedJoints[bad])}° เกินขอบเขต (${JOINT_LIMITS[bad][0]} ถึง ${JOINT_LIMITS[bad][1]}) จึงหยุดคำสั่ง`
-                                     : (jump > 10 ? `⚠️ MoveL: มุมข้อต่อเปลี่ยน ${jump.toFixed(1)}° ในช่วงเดียว จึงหยุดคำสั่ง` : `⚠️ MoveL: ตรวจพบการชน จึงหยุดคำสั่ง`));
-                      break;
-                  } }
-                for(let j=0; j<6; j++) {
-                    if (freedriveModes[j]) continue; 
-                    jointTargets[j] = Math.round(calculatedJoints[j]); 
-                    uiGraphTargets[j] = jointTargets[j];
-                    let slider = document.getElementById('joint'+(j+1)); if(slider) slider.value = jointTargets[j];
-                    let valDisp = document.getElementById('val'+(j+1)); if(valDisp) valDisp.innerText = jointTargets[j] + '°';
-                    let targetInp = document.getElementById('target'+(j+1)); if(targetInp) targetInp.value = jointTargets[j];
+        async function executeMoveL(targetX, targetY, targetZ, ref = null) {
+            if (freedriveModes.some(Boolean)) { isProgramRunning = false; window.notifyBlocked('MoveL: มีแกนปลดล็อก (Free) อยู่ ล็อกทุกแกนก่อนจึงจะใช้ MoveL ได้'); return; }
+            const startJoints = jointTargets.map(Number);
+            const plan = planMoveL(startJoints, [Number(targetX), Number(targetY), Number(targetZ)], true, ref);
+            if (plan.error) { isProgramRunning = false; window.notifyBlocked(plan.error); return; }
+            const traj = buildMoveLTrajectory(plan, globalSpeed);
+            const connected = !!(window.robotLink && window.robotLink.serialWriter) && !cdsOwnsArm;
+            // ส่งเป้าหมายช่วงสั้น ๆ ทุก 40 ms พร้อมเวลาที่ต้องไปถึง (A...,T<ms>) แขนจึงเคลื่อนต่อเนื่องไม่หยุดทุกจุด
+            // บอกเวลาเผื่อไว้ 10 ms ให้แขนยังเคลื่อนอยู่เสมอตอนคำสั่งถัดไปมาถึง (ไม่หยุดรอระหว่างช่วง)
+            const t0 = performance.now(); let tSched = 0;
+            for (const seg of traj.segs) {
+                if (!isProgramRunning) break;
+                const wait = t0 + tSched - performance.now(); if (wait > 0) await sleep(wait);
+                const q = seg.q;
+                for (let j = 0; j < 6; j++) {
+                    jointTargets[j] = Math.round(q[j] * 100) / 100; uiGraphTargets[j] = q[j];
+                    let slider = document.getElementById('joint'+(j+1)); if(slider) slider.value = Math.round(q[j]);
+                    let valDisp = document.getElementById('val'+(j+1)); if(valDisp && !connected) valDisp.innerText = Math.round(q[j]) + '°';
+                    let targetInp = document.getElementById('target'+(j+1)); if(targetInp) targetInp.value = Math.round(q[j]);
                 }
-                if(window.robotLink && window.robotLink.serialWriter) { await window.robotLink.sendJointsData(); }
-                let moveLDelay = 50 * (50 / globalSpeed); await sleep(moveLDelay);
+                if (connected) { try { await window.robotLink.serialWriter.write(`A${q.map(v => v.toFixed(2)).join(',')},T${seg.ms + 10}\n`); } catch (e) {} }
+                tSched += seg.ms;
             }
+            if (isProgramRunning) { const w = t0 + tSched - performance.now(); if (w > 0) await sleep(w); }
+            // รอให้แขนจริงถึงปลายทางก่อนทำคำสั่งถัดไป (เหมือน MoveJ)
+            if (isProgramRunning) await waitForArmArrival(jointTargets.slice(), traj.T * 1000);
         }
 
         window.runCompiledProgram = async function() {
@@ -1181,18 +2001,20 @@
             if(currentEditorMode === 'code') compileCodeToBlocks();
             if(!commandsData.length) return alert("ไม่มีคำสั่งครับ");
 
-            isProgramRunning = true; globalSpeed = 50; let loopCounters = {}; 
+            isProgramRunning = true; globalSpeed = defaultSpeed; let loopCounters = {}; 
+            sendSpeedToArduino(globalSpeed);   // [ปุ่มปรับ Speed] ให้ Arduino ใช้ความเร็วเดียวกับที่หน้านี้คำนวณเส้น Target
             let loopDisplay = document.getElementById('loop-display');
             let speedDisplay = document.getElementById('speed-display');
 
-            speedDisplay.innerText = "⚡ Speed: 50%";
+            speedDisplay.innerText = `Speed: ${globalSpeed}%`;
+            ['speed-slider', 'speed-input'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = true; });
             window.activeLoopCount = 1;
 
             let autoRecord = document.getElementById('auto-record-chk') && document.getElementById('auto-record-chk').checked;
             if(autoRecord) { clearTelemetry(); startTelemetry(); }
 
             const playBtn1 = document.getElementById('main-play-btn'); const playBtn2 = document.getElementById('side-play-btn');
-            if(playBtn1) { playBtn1.innerHTML = "⏹️ Stop Program"; playBtn1.className = "btn-action btn-danger"; }
+            if(playBtn1) { playBtn1.innerHTML = "Stop Program"; playBtn1.className = "btn-action btn-danger"; }
             if(playBtn2) { playBtn2.innerText = "Stop"; playBtn2.style.background = "var(--accent-red)"; }
 
             for(let i=0; i<commandsData.length; i++) {
@@ -1203,27 +2025,27 @@
                 let c = commandsData[i];
                 if(c.type === 'Speed') {
                     globalSpeed = c.val; 
-                    if(speedDisplay) speedDisplay.innerText = `⚡ Speed: ${globalSpeed}%`;
+                    if(speedDisplay) speedDisplay.innerText = `Speed: ${globalSpeed}%`;
                     if(window.robotLink && window.robotLink.serialWriter) { try { await window.robotLink.serialWriter.write(`S${globalSpeed}\n`); } catch(e) {} }
                 }
                 else if(c.type === 'MoveJ') {
-                    if (checkSelfCollision(c.val)) { alert(`⚠️ ตรวจพบการชน!`); isProgramRunning = false; break; }
-                    { const bad = limitViolation(c.val); if (bad >= 0) { alert(`⚠️ MoveJ: J${bad+1} = ${c.val[bad]}° เกินขอบเขต (${JOINT_LIMITS[bad][0]} ถึง ${JOINT_LIMITS[bad][1]})`); isProgramRunning = false; break; } }
-                    // 🟢 [REC เสถียร] เวลาเคลื่อนที่คิดจากแกนที่ต้องหมุนจำนวนสเต็ปมากที่สุด (แบบเดียวกับ MultiStepper ใน Arduino)
-                    let maxSteps = 0; for(let j=0; j<6; j++) { if (freedriveModes[j]) continue; let st = Math.abs(Math.round(c.val[j]) - jointTargets[j]) * STEPS_PER_DEGREE[j]; if (st > maxSteps) maxSteps = st; }
+                    if (checkSelfCollision(c.val)) { alert(`ตรวจพบการชน!`); isProgramRunning = false; break; }
+                    { const bad = limitViolation(c.val); if (bad >= 0) { alert(`MoveJ: J${bad+1} = ${c.val[bad]}° เกินขอบเขต (${JOINT_LIMITS[bad][0]} ถึง ${JOINT_LIMITS[bad][1]})`); isProgramRunning = false; break; } }
+                    // [REC เสถียร] เวลาเคลื่อนที่คิดจากแกนที่ต้องหมุนจำนวนสเต็ปมากที่สุด (แบบเดียวกับ MultiStepper ใน Arduino)
+                    let maxSteps = 0; for(let j=0; j<6; j++) { if (freedriveModes[j]) continue; let st = Math.abs(r2(c.val[j]) - jointTargets[j]) * STEPS_PER_DEGREE[j]; if (st > maxSteps) maxSteps = st; }
 
                     let startJoints = [...jointTargets];
                     let endJoints = [...c.val];
 
                     if(window.robotLink && window.robotLink.serialWriter) { 
-                        let degs = endJoints.map(d => Math.round(d));
+                        let degs = endJoints.map(d => fmtDeg(d));                // ไปท่าที่บันทึกไว้ตรงตามทศนิยม
                         window.robotLink.serialWriter.write(`A${degs.join(',')}\n`).catch(()=>{}); 
                     }
 
                     let stepsPerSec = 100 + ((globalSpeed - 1) * (2900 / 99));
                     let travelTimeMs = (maxSteps / stepsPerSec) * 1000 * HW_TIME_SCALE; 
 
-                    // 🟢 [REC เสถียร] เส้น Target คิดจากเวลาจริง (performance.now) ไม่ใช่นับจำนวนครั้งที่รอ 50 ms
+                    // [REC เสถียร] เส้น Target คิดจากเวลาจริง (performance.now) ไม่ใช่นับจำนวนครั้งที่รอ 50 ms
                     //    ต่อให้เครื่องหน่วง เส้น Target ก็ใช้เวลาเท่ากับแขนจริงทุกรอบ
                     let moveStart = performance.now();
                     while (isProgramRunning) {
@@ -1231,7 +2053,7 @@
                         for(let j=0; j<6; j++) {
                             if (freedriveModes[j]) continue; 
                             uiGraphTargets[j] = startJoints[j] + (endJoints[j] - startJoints[j]) * t;
-                            jointTargets[j] = Math.round(endJoints[j]); 
+                            jointTargets[j] = r2(endJoints[j]); 
 
                             let slider = document.getElementById('joint'+(j+1)); if(slider) slider.value = Math.round(uiGraphTargets[j]);
                             let valDisp = document.getElementById('val'+(j+1)); if(valDisp) valDisp.innerText = Math.round(uiGraphTargets[j]) + '°';
@@ -1243,15 +2065,16 @@
 
                     for(let j=0; j<6; j++) { 
                         if (freedriveModes[j]) continue; 
-                        uiGraphTargets[j] = Math.round(endJoints[j]); 
-                        jointTargets[j] = Math.round(endJoints[j]); 
+                        uiGraphTargets[j] = r2(endJoints[j]); 
+                        jointTargets[j] = r2(endJoints[j]); 
+                        let tarInp = document.getElementById('target'+(j+1)); if(tarInp) tarInp.value = fmtDeg(endJoints[j]);
                     }
-                    // 🟢 [REC เสถียร] รอให้แขนจริงถึงเป้าหมายก่อน แล้วค่อยพัก 0.5 วินาที
+                    // [REC เสถียร] รอให้แขนจริงถึงเป้าหมายก่อน แล้วค่อยพัก 0.5 วินาที
                     //    (เดิมนับเวลาตามเส้นจำลอง ถ้าเครื่องหน่วง แขนต้องหยุดรอที่จุดหมายนานขึ้นเรื่อย ๆ)
                     await waitForArmArrival(endJoints, travelTimeMs);
                     await sleep(500); 
                 }
-                else if(c.type === 'MoveL') { await executeMoveL(c.val[0], c.val[1], c.val[2]); await sleep(500); }
+                else if(c.type === 'MoveL') { await executeMoveL(c.val[0], c.val[1], c.val[2], c.ref || null); await sleep(500); }
                 else if(c.type === 'Wait') { await sleep(c.val * 1000); }
                 else if(c.type === 'SetIO') {
                     if(window.robotLink && window.robotLink.serialWriter) { let stateVal = c.state === 'on' ? 1 : 0; try { await window.robotLink.serialWriter.write(`O${c.pin},${stateVal}\n`); } catch(e) {} }
@@ -1262,7 +2085,7 @@
                     loopCounters[i]++; 
 
                     window.activeLoopCount = loopCounters[i] + 1;
-                    if(loopDisplay) loopDisplay.innerText = `[ 🔄 Loop: รอบที่ ${loopCounters[i]} / ${c.val} ]`;
+                    if(loopDisplay) loopDisplay.innerText = `[ Loop: รอบที่ ${loopCounters[i]} / ${c.val} ]`;
 
                     if(loopCounters[i] < c.val) { 
                         i = -1; 
@@ -1278,14 +2101,17 @@
             isProgramRunning = false; 
             window.activeLoopCount = 1; 
             if(autoRecord) { stopTelemetry(); } 
+            // [ปุ่มปรับ Speed] จบโปรแกรมแล้วกลับไปใช้ค่าที่ตั้งไว้ (บล็อก Speed ในโปรแกรมอาจเปลี่ยนค่าไป)
+            ['speed-slider', 'speed-input'].forEach(id => { const el = document.getElementById(id); if (el) el.disabled = false; });
+            window.setDefaultSpeed(defaultSpeed);
             if(loopDisplay) loopDisplay.innerText = ""; 
 
             document.getElementById('teach-mode-toggle').disabled = false;
             document.querySelectorAll('input[type="checkbox"][id^="free-j"]').forEach(t => t.disabled = false);
-            window.setArmOwnerLock(cdsOwnsArm);   // 🔵 [CODESYS]
+            window.setArmOwnerLock(cdsOwnsArm);   // [CODESYS]
 
             document.querySelectorAll('.robot-block').forEach(b => { b.style.opacity='1'; b.style.transform='scale(1)'; });
-            if(playBtn1) { playBtn1.innerHTML = "▶️ Run Full Program"; playBtn1.className = "btn-action btn-success"; }
+            if(playBtn1) { playBtn1.innerHTML = "Run Full Program"; playBtn1.className = "btn-action btn-success"; }
             if(playBtn2) { playBtn2.innerText = "Play"; playBtn2.style.background = "var(--accent-green)"; }
         }
 
@@ -1310,17 +2136,21 @@
         const vops = {"Link Base-1.STL":[], "Link Base-2.STL":[], "Link Base-3.STL":[], "Link 1-1.STL":[{type:'rx',val:180},{type:'rz',val:-90},{type:'t',x:0,y:0,z:-92}], "Link 1-2.STL":[], "Link 2-1.STL":[{type:'rz',val:-90},{type:'rx',val:270},{type:'t',x:-64.15,y:77.78,z:8.87}], "Link 2-2.STL":[], "Link 2-3.STL":[], "Link 3-1.STL":[{type:'rz',val:180},{type:'rx',val:180},{type:'t',x:0,y:305,z:-27.84}], "Link 3-2.STL":[], "Link 4-1.STL":[{type:'ry',val:90},{type:'rx',val:180},{type:'t',x:-36.7,y:0,z:-75.94}], "Link 4-2.STL":[],"Link 5-1.STL":[{type:'rz',val:180},{type:'ry',val:90},{type:'t',x:147,y:0,z:44.88}], "Link 5-2.STL":[], "Link 6-1.STL":[{type:'ry',val:90},{type:'t',x:43.3,y:0,z:25}], "Link 6-2.STL":[]};
         const robotMeshObjects = [];
 
-        // 🟢 โมเดล CAD ประกอบกลับด้านซ้าย-ขวากับแขนจริง (แขนท่อนบนอยู่คนละฝั่ง) จึงสะท้อนเฉพาะส่วนแขน (ตั้งแต่ J1 ขึ้นไป)
-        //    ในแนวแกน Y และกลับทิศการแสดงผลของ J1, J4, J6 เพื่อให้ทิศการหมุน มุม และพิกัด TCP ทำงานเหมือนเดิม
+        // โมเดล CAD ประกอบกลับด้านซ้าย-ขวากับแขนจริง (แขนท่อนบนอยู่คนละฝั่ง) จึงสะท้อนเฉพาะส่วนแขน (ตั้งแต่ J1 ขึ้นไป)
+        //    ในแนวแกน Y และกลับทิศการแสดงผลของข้อต่อ Link 1-1, Link 4-1, Link 6-1 (แกน J1, J5, J6 ดู AXIS_LINKS) เพื่อให้ทิศการหมุน มุม และพิกัด TCP ทำงานเหมือนเดิม
         //    (ถ้าต้องการกลับไปแบบเดิม ให้ตั้ง MIRROR_ARM = false)
         const MIRROR_ARM = true;
         const FLIP_JOINT = MIRROR_ARM ? { "Link 1-1.STL": true, "Link 4-1.STL": true, "Link 6-1.STL": true } : {};
-        // 🟢 สเต็ปเปอร์ J4 ที่ข้อศอก (โคนแขนท่อน 30.5 ซม.) ในโมเดล CAD ติดอยู่ใต้แขน แต่ของจริงติดอยู่ด้านบน
+        // สเต็ปเปอร์ J4 ที่ข้อศอก (โคนแขนท่อน 30.5 ซม.) ในโมเดล CAD ติดอยู่ใต้แขน แต่ของจริงติดอยู่ด้านบน
         //    จึงพลิกเฉพาะรูปทรงของชิ้นข้อศอก (Link 3-1 และ 3-2) บน-ล่าง รอบระนาบที่มีแกน J3 และแกน J4 อยู่
         //    แกนหมุน เฟรมข้อต่อ มุม และพิกัด TCP เหมือนเดิมทุกอย่าง เป็นการแก้หน้าตาอย่างเดียว
         //    (ถ้าต้องการกลับไปแบบเดิม ให้ตั้ง ELBOW_MOTOR_ON_TOP = false)
         const ELBOW_MOTOR_ON_TOP = true;
         const FLIP_MESH_UPDOWN = ELBOW_MOTOR_ON_TOP ? { "Link 3-1.STL": true, "Link 3-2.STL": true } : {};
+        // แกน J1-J6 ของแขนจริง -> ข้อต่อในโมเดล CAD
+        //   แขนจริง J4 = ข้อมือก้มเงย (ข้อต่อ Link 5-1) และ J5 = หมุนแขนท่อนปลาย (ข้อต่อ Link 4-1)
+        //   ซึ่งสลับกับลำดับชิ้นในโมเดล จึงจับคู่ตามนี้ (ใช้ทั้งการแสดงผลและการคำนวณ MoveL)
+        const AXIS_LINKS = ["Link 1-1.STL", "Link 2-1.STL", "Link 3-1.STL", "Link 5-1.STL", "Link 4-1.STL", "Link 6-1.STL"];
         window.robot = (function() {
             const nds = {};
             stls.forEach(n => {
@@ -1351,7 +2181,7 @@
                     parent.add(child);
                 }
             }
-            return { root: nds["Link Base-1.STL"].asm, joints: [nds["Link 1-1.STL"].joint, nds["Link 2-1.STL"].joint, nds["Link 3-1.STL"].joint, nds["Link 4-1.STL"].joint, nds["Link 5-1.STL"].joint, nds["Link 6-1.STL"].joint], nds: nds };
+            return { root: nds["Link Base-1.STL"].asm, joints: AXIS_LINKS.map(n => nds[n].joint), nds: nds };
         })();
         scene.add(window.robot.root);
         const tcpAx = new THREE.AxesHelper(100); tcpAx.visible = false; window.robot.joints[5].add(tcpAx); 
@@ -1407,7 +2237,7 @@
                     ld.style.border = '2px solid #e74c3c';
                     ld.innerHTML = `
                         <div style="color: #c0392b; font-size: 14px; text-align: left;">
-                            <b>❌ โหลดโมเดล 3D ไม่สำเร็จ!</b><br>
+                            <b>โหลดโมเดล 3D ไม่สำเร็จ!</b><br>
                             <span style="font-size: 12px;">สาเหตุ: ${e.message}</span>
                             <hr style="border-color:#e74c3c; margin: 10px 0;">
                             <b>วิธีแก้:</b><br>

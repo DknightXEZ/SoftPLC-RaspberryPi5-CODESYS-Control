@@ -12,7 +12,9 @@ function createWindow () {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-      webSecurity: false
+      webSecurity: false,
+      // 🟢 [REC ขณะอยู่เบื้องหลัง] ไม่ให้ Chromium ลดรอบตัวจับเวลาเหลือ 1 ครั้ง/วินาที เมื่อหน้าต่างถูกบังหรือย่อ
+      backgroundThrottling: false
     }
   });
 
@@ -39,6 +41,9 @@ function createWindow () {
 }
 
 app.commandLine.appendSwitch('enable-experimental-web-platform-features');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
 app.whenReady().then(() => {
   createWindow();
