@@ -1,18 +1,52 @@
 PROGRAM P_Arm
 VAR
+    // ---- ทดสอบอัตโนมัติ: ใส่ xBtnSelfTest = TRUE แล้วกด Ctrl+F7 จากนั้นอ่านผลที่ sTest ----
+    xBtnSelfTest : BOOL;              // ทดสอบ 5 ขั้นด้วยแกน J1: ขอสิทธิ์, +5 องศา, กลับ, ทดสอบ STOP, คืนสิทธิ์
+    sTest        : STRING(60);        // ผลการทดสอบ: RUNNING n/5 ... / PASS ... / FAIL n/5 ... / ABORTED ...
     fbLink       : FB_ArmLink;
+    // ---- ทดสอบความคลาดเคลื่อนและการทำซ้ำ (Home -> Point 1 -> Home ซ้ำ iCycTotal รอบ) ----
+    // ขั้นตอน: กด REQUEST ให้ CODESYS ถือสิทธิ์ แล้วสั่ง xBtnCycleTest = TRUE ผลสรุปอยู่ที่ sCyc และอาร์เรย์ผลลัพธ์ด้านล่าง
+    xBtnCycleTest : BOOL;             // เริ่มการทดสอบ (ปุ่ม STOP = ยกเลิก)
+    iCycTotal    : INT := 30;         // จำนวนรอบ (1..50)
+    alrCycP1     : ARRAY[0..5] OF LREAL := [4.0, 45.0, -27.0, -11.0, 9.0, 0.0];   // Point 1 เดียวกับการทดสอบโหมด Arduino [องศา]
+    lrCycSpeed   : LREAL := 40.0;     // ความเร็วระหว่างทดสอบ [%] (เท่ากับโหมด Arduino: Speed 40)
+    tCycDwell    : TIME := T#3S;      // หยุดรอที่ Point 1 และ Home (3 วินาที ให้อ่านเครื่องวัดมุมและเซ็นเซอร์ได้นิ่ง)
+    sCyc         : STRING(60);        // สถานะ: RUNNING k/n ... / DONE ... / ABORTED ...
+    iCyc         : INT;               // รอบที่กำลังทดสอบ
+    // ---- ผลรายรอบ (k = 1..iCycTotal, แกน 0..5 = J1..J6) ----
+    alrCycErr    : ARRAY[1..50, 0..5] OF LREAL;   // ความคลาดเคลื่อนที่มีขนาดมากที่สุดของรอบ (มีเครื่องหมาย) ระหว่างเคลื่อนที่ [องศา]
+    alrCycStop   : ARRAY[1..50, 0..5] OF LREAL;   // ความคลาดเคลื่อนขณะหยุดนิ่ง (ค่าที่มีขนาดมากกว่าระหว่าง Point 1 กับ Home) [องศา]
+    alrCycTGo    : ARRAY[1..50] OF LREAL;         // เวลาเคลื่อนที่ Home -> Point 1 [วินาที]
+    alrCycTBack  : ARRAY[1..50] OF LREAL;         // เวลาเคลื่อนที่ Point 1 -> Home [วินาที]
+    // ---- ผลสรุปของแต่ละแกน ----
+    alrSumMean   : ARRAY[0..5] OF LREAL;          // ค่าเฉลี่ยของ alrCycErr (สมการที่ 3.17)
+    alrSumMAE    : ARRAY[0..5] OF LREAL;          // ค่าเฉลี่ยของค่าสัมบูรณ์ (MAE)
+    alrSumMax    : ARRAY[0..5] OF LREAL;          // ค่าสัมบูรณ์สูงสุด (สมการที่ 3.18)
+    alrSumSD     : ARRAY[0..5] OF LREAL;          // ส่วนเบี่ยงเบนมาตรฐานตัวอย่าง (สมการที่ 3.19)
+    alrSumStop   : ARRAY[0..5] OF LREAL;          // ค่าสัมบูรณ์สูงสุดขณะหยุดนิ่ง
+    lrTGoMean    : LREAL;
+    lrTGoSD      : LREAL;
+    lrTBackMean  : LREAL;
+    lrTBackSD    : LREAL;
     // ---- ปุ่มของหน้า Visu (แบบ Tap) หรือสั่ง TRUE จากตารางตัวแปร: โปรแกรมเคลียร์กลับเป็น FALSE ให้เอง ----
     xBtnRequest  : BOOL;              // ขอสิทธิ์ควบคุม
     xBtnRelease  : BOOL;              // คืนสิทธิ์ให้อินเตอร์เฟสบน PC
-    xBtnStop     : BOOL;              // หยุดทุกแกน และหยุดการวิ่งตามลำดับจุด
+    xBtnStop     : BOOL;              // หยุดทุกแกน และหยุดการวิ่งตามลำดับจุดหรือการทดสอบ
     xBtnGoManual : BOOL;              // ไปยังองศาใน alrManual
     xBtnTeach    : BOOL;              // บันทึกตำแหน่งปัจจุบันลงจุดที่ iPoint
     xBtnGoPoint  : BOOL;              // ไปยังจุดที่ iPoint
     xBtnFreeAll  : BOOL;              // ปลดล็อคทุกแกน (จับแขนขยับด้วยมือ)
     xBtnLockAll  : BOOL;              // ล็อคทุกแกน
     xBtnRunSeq   : BOOL;              // วิ่งจุด 1 ถึง iSeqLast ตามลำดับ
+    xBtnCopyAct  : BOOL;              // เอาตำแหน่งปัจจุบันมาใส่ช่องเป้าหมาย alrManual
+    xBtnHome     : BOOL;              // ไปท่า HOME (มุมใน alrHome ค่าเริ่มคือ 0 ทุกแกน)
+    xBtnJogPlus  : BOOL;              // jog แกน iJogAxis ไปทาง + ทีละ lrJogStep องศา (กดหนึ่งครั้ง = หนึ่งก้าว)
+    xBtnJogMinus : BOOL;              // jog แกน iJogAxis ไปทาง - ทีละ lrJogStep องศา
     // ---- ค่าตั้ง ----
     alrManual    : ARRAY[0..5] OF LREAL;   // เป้าหมายที่พิมพ์เอง J1..J6 [องศา]
+    alrHome      : ARRAY[0..5] OF LREAL;   // ท่า HOME J1..J6 [องศา] (ค่าเริ่ม 0 ทุกแกน)
+    iJogAxis     : INT := 1;          // แกนที่จะ jog 1..6
+    lrJogStep    : LREAL := 1.0;      // องศาต่อการกด jog หนึ่งครั้ง (0.1..30)
     iPoint       : INT := 1;          // หมายเลขจุด 1..20
     lrSpeed      : LREAL := 30.0;     // ความเร็ว 1..100 %
     iSeqLast     : INT := 3;          // จุดสุดท้ายของลำดับ
@@ -25,9 +59,49 @@ VAR
     xOwner       : BOOL;
     xMoving      : BOOL;
     xInPos       : BOOL;              // ทุกแกนอยู่ที่เป้าหมายที่สั่งล่าสุดและหยุดนิ่ง
+    xAnyFreeNow  : BOOL;              // มีแกนที่ปลดล็อคอยู่ (จาก Arduino)
     xSeqRunning  : BOOL;
     iSeqPoint    : INT;               // จุดที่กำลังไป
     sMsg         : STRING(40);
+    // ---- โปรแกรมแบบบล็อก (เหมือน Program Studio ในแอป PC): MoveJ / Speed / Wait / Loop ----
+    // ขั้นตอน: กด REQUEST ให้ CODESYS ถือสิทธิ์ แล้วกด RUN PROGRAM (ปุ่ม STOP = หยุดทันที)
+    xBtnPrgRun     : BOOL;            // เริ่มรันโปรแกรมตั้งแต่ขั้นที่ 1
+    xBtnPrgLoad    : BOOL;            // โหลดขั้นที่ iPrgEdit มาใส่ช่องแก้ไข
+    xBtnPrgSave    : BOOL;            // บันทึกช่องแก้ไขทับขั้นที่ iPrgEdit
+    xBtnPrgIns     : BOOL;            // แทรกช่องแก้ไขเป็นขั้นใหม่ที่ตำแหน่ง iPrgEdit (ขั้นเดิมเลื่อนลง)
+    xBtnPrgDel     : BOOL;            // ลบขั้นที่ iPrgEdit (ขั้นถัดไปเลื่อนขึ้น)
+    xBtnPrgTeach   : BOOL;            // เอามุมจริงตอนนี้ใส่ช่อง J1..J6 ของช่องแก้ไข
+    xBtnPrgDefault : BOOL;            // โหลดโปรแกรมจุดปากกา 12 ขั้น (ค่าเริ่มต้น) กลับมา
+    iPrgEdit       : INT := 1;        // ขั้นที่จะแก้ 1..20
+    iEdType        : INT := 1;        // ช่องแก้ไข: 1 = MoveJ, 2 = Speed, 3 = Wait, 4 = Loop
+    alrEdJ         : ARRAY[0..5] OF LREAL;   // ช่องแก้ไข: มุม J1..J6 ของ MoveJ [องศา]
+    lrEdVal        : LREAL;           // ช่องแก้ไข: Speed [%], Wait [วินาที] หรือ Loop [รอบ]
+    tPrgAfterMove  : TIME := T#500MS; // หยุดรอหลังถึงจุดของ MoveJ ทุกครั้ง (แอป PC รอ 0.5 วินาทีเท่ากัน)
+    // ---- แสดงผลของโปรแกรมแบบบล็อก ----
+    xPrgRun        : BOOL;            // กำลังรันโปรแกรม
+    sPrg           : STRING(60);      // สถานะ: READY / RUNNING ... / DONE ... / STOPPED ... / ABORTED ...
+    iPrgN          : INT;             // จำนวนขั้นของโปรแกรม (นับจนถึงขั้นแรกที่ว่าง)
+    iPrgStep       : INT;             // ขั้นที่กำลังทำ
+    iPrgLoop       : INT;             // รอบที่กำลังทำ (ตามบล็อก Loop แรก)
+    iPrgLoopN      : INT;             // จำนวนรอบทั้งหมด (ค่าในบล็อก Loop แรก, ไม่มี Loop = 1)
+    lrPrgLoopT     : LREAL;           // เวลาของรอบล่าสุด [วินาที]
+    lrPrgLoopMean  : LREAL;           // เวลาเฉลี่ยต่อรอบ [วินาที]
+    alrPrgLoopT    : ARRAY[1..100] OF LREAL;   // เวลาของแต่ละรอบ [วินาที]
+    asPrgText      : ARRAY[1..20] OF STRING(80);  // ข้อความแต่ละขั้นสำหรับตารางในหน้า Visu ('>>' = ขั้นที่กำลังทำ)
+    // ---- ภายใน: โปรแกรมแบบบล็อก ----
+    iPrgState      : INT;             // 0 = เริ่มขั้น, 1 = รอ Arduino ตอบรับ MoveJ, 2 = รอถึงจุด, 3 = Wait, 4 = หยุดรอหลังถึงจุด
+    iPrgWait       : INT;
+    lrPrgSpeed     : LREAL;           // ความเร็วที่ใช้กับ MoveJ ถัดไป (ตั้งด้วยบล็อก Speed)
+    aiPrgLoopCnt   : ARRAY[1..20] OF INT;     // ตัวนับของบล็อก Loop แต่ละขั้น (แบบเดียวกับแอป PC)
+    iPrgFirstLoop  : INT;             // ขั้นของบล็อก Loop แรก (0 = ไม่มี)
+    iPrgLoopsDone  : INT;
+    tonPrg         : TON;             // จับเวลา Wait และการหยุดรอหลังถึงจุด
+    tonPrgLimit    : TON;             // เวลาสูงสุดที่ยอมให้ MoveJ ไปถึงจุด (tMoveLimit)
+    tonPrgClock    : TON;             // นาฬิกาจับเวลาต่อรอบ
+    tPrgLoopStart  : TIME;
+    xPrgBad        : BOOL;
+    iPs              : INT;
+    sPrgTmp        : STRING(80);
     // ---- ภายใน ----
     xMoveCmd     : BOOL;
     xStopCmd     : BOOL;
@@ -38,5 +112,66 @@ VAR
     rtCmdErr     : R_TRIG;
     rtCmdDone    : R_TRIG;
     lrErrMax     : LREAL;
+    rtOwner      : R_TRIG;            // CODESYS เพิ่งได้สิทธิ์ควบคุม
+    xJogCmd      : BOOL;              // รอบนี้ส่งคำสั่ง jog
+    iJogIdx      : INT;               // แกนที่ jog แบบเริ่มที่ 0
+    lrJogPend    : LREAL;             // ระยะ jog ที่รอส่ง [องศา] (กดซ้ำระหว่างรอ Arduino ตอบ ระยะจะรวมกัน)
+    xBusyPrev    : BOOL;              // fbLink.xBusy ของรอบก่อน
     i            : INT;
+    // ---- ภายใน: ทดสอบอัตโนมัติ ----
+    iTest        : INT;               // 0 = ไม่ได้ทดสอบ, 1..5 = ขั้นที่กำลังทำ
+    iTestSub     : INT;               // ขั้นย่อยภายในขั้น
+    iTestWait    : INT;               // นับรอบหลังส่งคำสั่ง
+    xTestNext    : BOOL;
+    xTestReq     : BOOL;
+    xTestRel     : BOOL;
+    sStep        : STRING(10);
+    alrTestStart : ARRAY[0..5] OF LREAL;   // ตำแหน่งตอนเริ่มทดสอบ [องศา]
+    tonTest      : TON;               // เวลารอสูงสุดของแต่ละขั้น
+    tonTestDelay : TON;               // หน่วง 1 วินาทีก่อนสั่ง STOP ในขั้นที่ 4
+    lrSpeedUse   : LREAL;
+    wMaskUse     : WORD;
+    // ---- ภายใน: ทดสอบ 30 รอบ ----
+    xCycRun      : BOOL;
+    iCycState    : INT;               // 1 = เข้าท่า Home ก่อนเริ่ม, 2 = ไป Point 1, 3 = กลับ Home
+    iCycSub      : INT;
+    iCycWait     : INT;
+    xCycSawMove  : BOOL;
+    tonCycDwell  : TON;
+    tonCycLimit  : TON;
+    alrLegStart  : ARRAY[0..5] OF LREAL;
+    alrLegGoal   : ARRAY[0..5] OF LREAL;
+    alrBuf       : ARRAY[0..1199, 0..5] OF LREAL;  // มุมที่บันทึกทุก 0.1 วินาทีระหว่างเคลื่อนที่
+    axBufMov     : ARRAY[0..1199] OF BOOL;
+    atBuf        : ARRAY[0..1199] OF TIME;          // เวลาของแต่ละตัวอย่างนับจากเริ่มช่วง
+    tNextSample  : TIME;
+    iBufN        : INT;
+    iMovFirst    : INT;
+    iMovLast     : INT;
+    j            : INT;
+    k            : INT;
+    lrFrac       : LREAL;
+    lrRef        : LREAL;
+    lrE          : LREAL;
+    lrLegT       : LREAL;
+    lrSum        : LREAL;
+    lrSum2       : LREAL;
+END_VAR
+VAR RETAIN
+    // ---- โปรแกรมแบบบล็อก 20 ขั้น (เก็บไว้แม้ปิดเครื่อง) ค่าเริ่มต้น = โปรแกรมจุดปากกาที่ใช้ในแอป PC ----
+    //  #1 MoveJ 0,0,0,0,0,0   #2 Speed 50   #3 MoveJ 6,40,-14,-7,0,0   #4 Speed 20   #5 MoveJ 6,51,-14,-7,0,0
+    //  #6 Wait 1   #7 Speed 5   #8 MoveJ 6,52,-14,-7,0,0   #9 Wait 1   #10 Speed 50   #11 MoveJ 0,0,0,0,0,0   #12 Loop 30
+    aiPrgType : ARRAY[1..20] OF INT := [1, 2, 1, 2, 1, 3, 2, 1, 3, 2, 1, 4, 8(0)];        // 0 = ว่าง (จบโปรแกรม)
+    alrPrgJ   : ARRAY[1..20, 0..5] OF LREAL := [
+                    12(0.0),
+                    6.0, 40.0, -14.0, -7.0, 0.0, 0.0,
+                    6(0.0),
+                    6.0, 51.0, -14.0, -7.0, 0.0, 0.0,
+                    12(0.0),
+                    6.0, 52.0, -14.0, -7.0, 0.0, 0.0,
+                    72(0.0)];
+    alrPrgVal : ARRAY[1..20] OF LREAL := [0.0, 50.0, 0.0, 20.0, 0.0, 1.0, 5.0, 0.0, 1.0, 50.0, 0.0, 30.0, 8(0.0)];
+END_VAR
+VAR CONSTANT
+    TEST_SPEED   : LREAL := 10.0;     // ความเร็วระหว่างทดสอบ [%]
 END_VAR

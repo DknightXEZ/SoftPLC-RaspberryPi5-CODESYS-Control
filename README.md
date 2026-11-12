@@ -86,7 +86,9 @@ SoftPLC-RaspberryPi5-CODESYS-Control/
 │   ├── 2a_FB_ArmLink_TOP.txt      ส่วนประกาศตัวแปรของ FB_ArmLink
 │   ├── 2b_FB_ArmLink_BOTTOM.txt   ลอจิก FB_ArmLink (สถานะลิงก์, แปลงค่า, CMD_SEQ / ACK_SEQ)
 │   ├── 3a_P_Arm_TOP.txt           ส่วนประกาศตัวแปรของโปรแกรมหลัก P_Arm
-│   └── 3b_P_Arm_BOTTOM.txt        ลอจิก P_Arm (Manual, Teach, RUN SEQ / LOOP, xInPos)
+│   ├── 3b_P_Arm_BOTTOM.txt        ลอจิก P_Arm (Manual, Teach, RUN SEQ / LOOP, xInPos, ตัวรันโปรแกรมของ Visu_Prog)
+│   ├── 4_F_Fix1.txt               ฟังก์ชัน F_Fix1 แปลงตัวเลขเป็นข้อความทศนิยม 1 ตำแหน่ง (ใช้บนหน้าจอ Visu_Prog)
+│   └── Visu_Prog.export           หน้าจอ Visu_Prog สำหรับเขียนและรันโปรแกรมแบบบล็อกบน CODESYS
 ├── Arduino_Controller_CODESYS/
 │   ├── Arduino_Controller_CODESYS.ino   เฟิร์มแวร์หลัก (มอเตอร์, AS5600, EEPROM, USB Serial)
 │   ├── CodesysLink.h                    ค่าคงที่การสื่อสารกับ CODESYS
@@ -138,7 +140,7 @@ SoftPLC-RaspberryPi5-CODESYS-Control/
 
 ### 3) โปรเจกต์ CODESYS V3.5
 
-1. สร้าง `GVL_ARM`, Function Block `FB_ArmLink` และโปรแกรม `P_Arm` แล้วคัดลอกโค้ดจากโฟลเดอร์ `CODESYS/` (ไฟล์ `TOP` = ส่วนประกาศตัวแปร, `BOTTOM` = ส่วนลอจิก)
+1. สร้าง `GVL_ARM`, Function Block `FB_ArmLink`, ฟังก์ชัน `F_Fix1` และโปรแกรม `P_Arm` แล้วคัดลอกโค้ดจากโฟลเดอร์ `CODESYS/` (ไฟล์ `TOP` = ส่วนประกาศตัวแปร, `BOTTOM` = ส่วนลอจิก, `4_F_Fix1.txt` = ทั้งฟังก์ชัน) จากนั้นนำเข้าหน้าจอ `Visu_Prog` ด้วยเมนู **Project → Import** แล้วเลือกไฟล์ `Visu_Prog.export`
 2. เพิ่มอุปกรณ์ **Modbus COM** ที่ `COM1`, `115200`, `8N1`, Parity `NONE`
 3. ตั้งค่า **Modbus Slave Channel**
 

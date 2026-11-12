@@ -1,0 +1,19 @@
+FUNCTION F_Fix1 : STRING(16)
+// แปลงตัวเลขเป็นข้อความทศนิยม 1 ตำแหน่ง เช่น -14 -> '-14.0', 51.96 -> '52.0'
+// (ใช้แทน LREAL_TO_STRING ซึ่งอาจได้ข้อความยาวเช่น '51.999999999')
+VAR_INPUT
+    lrX  : LREAL;
+END_VAR
+VAR
+    diVal  : DINT;
+    sSgn : STRING(1);
+END_VAR
+
+diVal := LREAL_TO_DINT(lrX * 10.0);      // ปัดเป็นหน่วย 0.1
+IF diVal < 0 THEN
+    sSgn := '-';
+    diVal  := -diVal;
+ELSE
+    sSgn := '';
+END_IF
+F_Fix1 := CONCAT(CONCAT(sSgn, DINT_TO_STRING(diVal / 10)), CONCAT('.', DINT_TO_STRING(diVal MOD 10)));

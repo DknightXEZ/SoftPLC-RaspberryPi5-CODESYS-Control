@@ -1,7 +1,12 @@
 xMoveCmd := FALSE;
 xStopCmd := FALSE;
+xTestReq := FALSE;
+xTestRel := FALSE;
+xJogCmd  := FALSE;
 iPoint   := LIMIT(1, iPoint, 20);
 iSeqLast := LIMIT(1, iSeqLast, 20);
+iJogAxis := LIMIT(1, iJogAxis, 6);
+lrJogStep := LIMIT(0.1, lrJogStep, 30.0);
 
 // ---------------- Teach: เก็บตำแหน่งปัจจุบันลงจุดที่เลือก ----------------
 IF xBtnTeach AND xLinkOK THEN
@@ -12,19 +17,48 @@ IF xBtnTeach AND xLinkOK THEN
     sMsg := 'point saved';
 END_IF
 
-// ---------------- สั่งไปตำแหน่งด้วยมือ (ไม่รับระหว่างวิ่งตามลำดับ) ----------------
-IF NOT xSeqRunning THEN
+// ---------------- เอาตำแหน่งปัจจุบันมาใส่ช่องเป้าหมาย ----------------
+// ทำเมื่อกดปุ่ม COPY และทุกครั้งที่ CODESYS เพิ่งได้สิทธิ์ เพื่อให้แกนที่ไม่ได้แก้ค่าอยู่กับที่ตอนกด GO
+rtOwner(CLK := xOwner);
+IF xBtnCopyAct OR rtOwner.Q THEN
+    FOR i := 0 TO 5 DO
+        alrManual[i] := GVL_ARM.alrAct[i];
+    END_FOR
+END_IF
+
+// ---------------- สั่งไปตำแหน่งด้วยมือ (ไม่รับระหว่างวิ่งตามลำดับหรือระหว่างทดสอบ) ----------------
+IF (NOT xSeqRunning) AND (iTest = 0) AND (NOT xCycRun) AND (NOT xPrgRun) THEN
     IF xBtnGoManual THEN
         FOR i := 0 TO 5 DO
             GVL_ARM.alrCmd[i] := alrManual[i];
         END_FOR
-        xMoveCmd := TRUE;
+        lrJogPend := 0.0;
+        xMoveCmd  := TRUE;
+    ELSIF xBtnHome THEN
+        FOR i := 0 TO 5 DO
+            alrManual[i]      := alrHome[i];      // ช่องเป้าหมายบนหน้าจอแสดงท่า HOME ด้วย
+            GVL_ARM.alrCmd[i] := alrHome[i];
+        END_FOR
+        lrJogPend := 0.0;
+        xMoveCmd  := TRUE;
+    ELSIF xBtnJogPlus OR xBtnJogMinus THEN
+        // jog: เก็บระยะไว้ก่อน แล้วส่งในส่วน "ส่ง jog" ด้านล่าง
+        IF iJogAxis - 1 <> iJogIdx THEN
+            lrJogPend := 0.0;                 // เปลี่ยนแกน: ทิ้งระยะที่ยังไม่ได้ส่งของแกนเดิม
+            iJogIdx   := iJogAxis - 1;
+        END_IF
+        IF xBtnJogPlus THEN
+            lrJogPend := lrJogPend + lrJogStep;
+        ELSE
+            lrJogPend := lrJogPend - lrJogStep;
+        END_IF
     ELSIF xBtnGoPoint THEN
         IF GVL_ARM.axPointSet[iPoint] THEN
             FOR i := 0 TO 5 DO
                 GVL_ARM.alrCmd[i] := GVL_ARM.alrPoint[iPoint, i];
             END_FOR
-            xMoveCmd := TRUE;
+            lrJogPend := 0.0;
+            xMoveCmd  := TRUE;
         ELSE
             sMsg := 'point is empty';
         END_IF
@@ -32,11 +66,12 @@ IF NOT xSeqRunning THEN
 END_IF
 
 // ---------------- วิ่งตามลำดับจุด 1..iSeqLast ----------------
-IF xBtnRunSeq AND NOT xSeqRunning THEN
+IF xBtnRunSeq AND (NOT xSeqRunning) AND (iTest = 0) AND (NOT xCycRun) AND (NOT xPrgRun) THEN
     IF xOwner THEN
         xSeqRunning := TRUE;
         iSeqPoint   := 1;
         iSeqState   := 0;
+        lrJogPend   := 0.0;
         sMsg := 'sequence running';
     ELSE
         sMsg := 'request control first';
@@ -44,7 +79,8 @@ IF xBtnRunSeq AND NOT xSeqRunning THEN
 END_IF
 
 IF xBtnStop THEN
-    xStopCmd := TRUE;
+    xStopCmd  := TRUE;
+    lrJogPend := 0.0;                       // ทิ้ง jog ที่ยังไม่ได้ส่ง
     IF xSeqRunning THEN
         xSeqRunning := FALSE;
         sMsg := 'sequence stopped';
@@ -106,20 +142,758 @@ IF xSeqRunning THEN
     END_CASE
 END_IF
 
+// ---------------- ทดสอบอัตโนมัติ 5 ขั้น (ขยับเฉพาะ J1 ด้วยความเร็ว TEST_SPEED) ----------------
+// 1 ขอสิทธิ์  2 J1 +5 องศา  3 J1 กลับที่เดิม  4 J1 ไป +20 องศาแล้วสั่ง STOP กลางทาง แล้วกลับที่เดิม  5 คืนสิทธิ์ให้ PC
+IF xBtnSelfTest AND (iTest = 0) AND (NOT xCycRun) AND (NOT xPrgRun) THEN
+    IF NOT xLinkOK THEN
+        sTest := 'FAIL 1/5: no link to Arduino';
+    ELSIF xSeqRunning OR xMoving OR fbLink.xBusy THEN
+        sTest := 'FAIL: wait until the arm stops, then retry';
+    ELSE
+        FOR i := 0 TO 5 DO
+            alrTestStart[i] := GVL_ARM.alrAct[i];
+        END_FOR
+        iTest     := 1;
+        iTestSub  := 0;
+        iTestWait := 0;
+        lrJogPend := 0.0;
+        tonTest(IN := FALSE);
+        sTest := 'RUNNING 1/5: request control';
+    END_IF
+END_IF
+
+IF iTest > 0 THEN
+    sStep     := CONCAT(INT_TO_STRING(iTest), '/5: ');
+    xTestNext := FALSE;
+    iTestWait := iTestWait + 1;
+    tonTest(IN := TRUE, PT := T#15S);
+    IF xBtnStop THEN
+        sTest := CONCAT(CONCAT('ABORTED ', sStep), 'STOP pressed');
+        iTest := 0;
+    ELSIF NOT xLinkOK THEN
+        sTest := CONCAT(CONCAT('FAIL ', sStep), 'link to Arduino lost');
+        iTest := 0;
+    ELSIF (iTest >= 2) AND (iTest <= 4) AND NOT xOwner THEN
+        sTest := CONCAT(CONCAT('FAIL ', sStep), 'control lost');
+        xStopCmd := TRUE;
+        iTest := 0;
+    END_IF
+END_IF
+
+CASE iTest OF
+1:  // ขอสิทธิ์ควบคุม
+    IF xOwner THEN
+        xTestNext := TRUE;
+    ELSIF iTestSub = 0 THEN
+        xTestReq  := TRUE;
+        iTestSub  := 1;
+        iTestWait := 0;
+    ELSIF iTestWait >= 2 AND NOT fbLink.xBusy AND fbLink.xError THEN
+        sTest := CONCAT(CONCAT('FAIL ', sStep), fbLink.sResult);
+        iTest := 0;
+    ELSIF tonTest.Q THEN
+        sTest := CONCAT(CONCAT('FAIL ', sStep), 'control not granted');
+        iTest := 0;
+    END_IF
+
+2, 3:  // J1 ไป +5 องศา (ขั้น 2) แล้วกลับที่เดิม (ขั้น 3)
+    CASE iTestSub OF
+    0:
+        FOR i := 0 TO 5 DO
+            GVL_ARM.alrCmd[i] := alrTestStart[i];
+        END_FOR
+        IF iTest = 2 THEN
+            GVL_ARM.alrCmd[0] := alrTestStart[0] + 5.0;
+        END_IF
+        xMoveCmd  := TRUE;
+        iTestSub  := 1;
+        iTestWait := 0;
+    1:
+        IF iTestWait >= 2 AND NOT fbLink.xBusy THEN
+            IF fbLink.xError THEN
+                sTest := CONCAT(CONCAT('FAIL ', sStep), fbLink.sResult);
+                iTest := 0;
+            ELSE
+                iTestSub := 2;
+            END_IF
+        END_IF
+    2:
+        IF xInPos THEN
+            xTestNext := TRUE;
+        ELSIF tonTest.Q THEN
+            sTest := CONCAT(CONCAT('FAIL ', sStep), 'J1 did not reach the target');
+            xStopCmd := TRUE;
+            iTest := 0;
+        END_IF
+    END_CASE
+
+4:  // ทดสอบ STOP
+    CASE iTestSub OF
+    0:
+        FOR i := 0 TO 5 DO
+            GVL_ARM.alrCmd[i] := alrTestStart[i];
+        END_FOR
+        GVL_ARM.alrCmd[0] := alrTestStart[0] + 20.0;
+        xMoveCmd  := TRUE;
+        iTestSub  := 1;
+        iTestWait := 0;
+    1:
+        IF iTestWait >= 2 AND NOT fbLink.xBusy THEN
+            IF fbLink.xError THEN
+                sTest := CONCAT(CONCAT('FAIL ', sStep), fbLink.sResult);
+                iTest := 0;
+            ELSE
+                tonTestDelay(IN := FALSE);
+                iTestSub := 2;
+            END_IF
+        END_IF
+    2:  // ปล่อยให้หมุน 1 วินาที แล้วสั่ง STOP
+        tonTestDelay(IN := xMoving, PT := T#1S);
+        IF tonTestDelay.Q THEN
+            tonTestDelay(IN := FALSE);
+            xStopCmd  := TRUE;
+            iTestSub  := 3;
+            iTestWait := 0;
+            tonTest(IN := FALSE);
+        ELSIF tonTest.Q THEN
+            sTest := CONCAT(CONCAT('FAIL ', sStep), 'J1 did not start moving');
+            xStopCmd := TRUE;
+            iTest := 0;
+        END_IF
+    3:  // ต้องหยุดก่อนถึง +20 องศา
+        IF iTestWait >= 2 AND NOT fbLink.xBusy AND NOT xMoving THEN
+            IF fbLink.xError THEN
+                sTest := CONCAT(CONCAT('FAIL ', sStep), fbLink.sResult);
+                iTest := 0;
+            ELSIF GVL_ARM.alrAct[0] < alrTestStart[0] + 18.0 THEN
+                iTestSub := 4;
+            ELSE
+                sTest := CONCAT(CONCAT('FAIL ', sStep), 'STOP did not stop J1');
+                iTest := 0;
+            END_IF
+        ELSIF tonTest.Q THEN
+            sTest := CONCAT(CONCAT('FAIL ', sStep), 'J1 still moving after STOP');
+            xStopCmd := TRUE;
+            iTest := 0;
+        END_IF
+    4:  // กลับที่เดิม
+        FOR i := 0 TO 5 DO
+            GVL_ARM.alrCmd[i] := alrTestStart[i];
+        END_FOR
+        xMoveCmd  := TRUE;
+        iTestSub  := 5;
+        iTestWait := 0;
+        tonTest(IN := FALSE);
+    5:
+        IF iTestWait >= 2 AND NOT fbLink.xBusy THEN
+            IF fbLink.xError THEN
+                sTest := CONCAT(CONCAT('FAIL ', sStep), fbLink.sResult);
+                iTest := 0;
+            ELSE
+                iTestSub := 6;
+            END_IF
+        END_IF
+    6:
+        IF xInPos THEN
+            xTestNext := TRUE;
+        ELSIF tonTest.Q THEN
+            sTest := CONCAT(CONCAT('FAIL ', sStep), 'J1 did not return');
+            xStopCmd := TRUE;
+            iTest := 0;
+        END_IF
+    END_CASE
+
+5:  // คืนสิทธิ์ให้ PC
+    IF iTestSub = 0 THEN
+        xTestRel  := TRUE;
+        iTestSub  := 1;
+        iTestWait := 0;
+    ELSIF iTestWait >= 2 AND NOT fbLink.xBusy THEN
+        IF fbLink.xError THEN
+            sTest := CONCAT(CONCAT('FAIL ', sStep), fbLink.sResult);
+            iTest := 0;
+        ELSIF NOT xOwner THEN
+            xTestNext := TRUE;
+        END_IF
+    END_IF
+    IF (iTest > 0) AND NOT xTestNext AND tonTest.Q THEN
+        sTest := CONCAT(CONCAT('FAIL ', sStep), 'control not released');
+        iTest := 0;
+    END_IF
+END_CASE
+
+IF xTestNext AND (iTest > 0) THEN
+    iTest     := iTest + 1;
+    iTestSub  := 0;
+    iTestWait := 0;
+    tonTest(IN := FALSE);
+    CASE iTest OF
+    2: sTest := 'RUNNING 2/5: J1 +5 deg';
+    3: sTest := 'RUNNING 3/5: J1 back to start';
+    4: sTest := 'RUNNING 4/5: STOP test (J1 +20 deg)';
+    5: sTest := 'RUNNING 5/5: release control';
+    ELSE
+        sTest := 'PASS 5/5: link, move, stop, release OK';
+        iTest := 0;
+    END_CASE
+END_IF
+
+// ---------------- ทดสอบความคลาดเคลื่อนและการทำซ้ำ: Home -> Point 1 -> Home ซ้ำ iCycTotal รอบ ----------------
+// บันทึกมุมทุก 0.1 วินาทีระหว่างเคลื่อนที่ แล้วเทียบกับเส้นทางอ้างอิงความเร็วคงที่ตั้งแต่เริ่มเคลื่อนที่จนถึงเป้า (เหมือนการทดสอบโหมด Arduino)
+IF xBtnCycleTest AND (NOT xCycRun) AND (iTest = 0) AND (NOT xSeqRunning) AND (NOT xPrgRun) THEN
+    iCycTotal := LIMIT(1, iCycTotal, 50);
+    IF NOT xLinkOK THEN
+        sCyc := 'FAIL: no link to Arduino';
+    ELSIF NOT xOwner THEN
+        sCyc := 'FAIL: press REQUEST first';
+    ELSIF xMoving OR fbLink.xBusy THEN
+        sCyc := 'FAIL: wait until the arm stops';
+    ELSE
+        FOR k := 1 TO 50 DO
+            alrCycTGo[k] := 0.0;
+            alrCycTBack[k] := 0.0;
+            FOR i := 0 TO 5 DO
+                alrCycErr[k, i]  := 0.0;
+                alrCycStop[k, i] := 0.0;
+            END_FOR
+        END_FOR
+        xCycRun   := TRUE;
+        iCyc      := 0;
+        iCycState := 1;                     // เข้าท่า Home ก่อน (ไม่นับเป็นรอบทดสอบ)
+        iCycSub   := 0;
+        lrJogPend := 0.0;
+        sCyc := 'RUNNING: moving to Home';
+    END_IF
+END_IF
+
+IF xCycRun THEN
+    IF xBtnStop THEN
+        xCycRun := FALSE;
+        sCyc := CONCAT('ABORTED at cycle ', INT_TO_STRING(iCyc));
+    ELSIF NOT xLinkOK OR NOT xOwner THEN
+        xCycRun := FALSE;
+        xStopCmd := TRUE;
+        sCyc := CONCAT('ABORTED (link/control lost) at cycle ', INT_TO_STRING(iCyc));
+    END_IF
+END_IF
+
+IF xCycRun THEN
+    iCycWait := iCycWait + 1;
+    CASE iCycSub OF
+    0:  // ส่งเป้าหมายของช่วงนี้
+        FOR i := 0 TO 5 DO
+            alrLegStart[i] := GVL_ARM.alrAct[i];
+            IF iCycState = 2 THEN
+                alrLegGoal[i] := alrCycP1[i];
+            ELSE
+                alrLegGoal[i] := alrHome[i];
+            END_IF
+            GVL_ARM.alrCmd[i] := alrLegGoal[i];
+        END_FOR
+        xMoveCmd    := TRUE;
+        iCycWait    := 0;
+        iBufN       := 0;
+        xCycSawMove := FALSE;
+        tonCycLimit(IN := FALSE);
+        iCycSub := 1;
+    1:  // รอ Arduino ตอบรับคำสั่ง
+        IF iCycWait >= 2 AND NOT fbLink.xBusy THEN
+            IF fbLink.xError THEN
+                xCycRun := FALSE;
+                sCyc := CONCAT('ABORTED: move refused ', fbLink.sResult);
+            ELSE
+                tonCycLimit(IN := FALSE);
+                tNextSample := T#0MS;
+                iCycSub := 2;
+            END_IF
+        END_IF
+    2:  // บันทึกมุมทุก 0.1 วินาทีจนถึงเป้า (เวลาอ้างอิงจาก tonCycLimit.ET)
+        tonCycLimit(IN := TRUE, PT := T#30S);
+        IF tonCycLimit.ET >= tNextSample THEN
+            tNextSample := tNextSample + T#100MS;
+            IF iBufN <= 1199 THEN
+                atBuf[iBufN] := tonCycLimit.ET;
+                FOR i := 0 TO 5 DO
+                    alrBuf[iBufN, i] := GVL_ARM.alrAct[i];
+                END_FOR
+                axBufMov[iBufN] := xMoving;
+                iBufN := iBufN + 1;
+            END_IF
+        END_IF
+        IF xMoving THEN
+            xCycSawMove := TRUE;
+        END_IF
+        IF xInPos AND (xCycSawMove OR iBufN >= 20) THEN
+            iCycSub := 3;
+        ELSIF tonCycLimit.Q THEN
+            xCycRun := FALSE;
+            xStopCmd := TRUE;
+            sCyc := CONCAT('ABORTED: target not reached, cycle ', INT_TO_STRING(iCyc));
+        END_IF
+    3:  // วิเคราะห์ช่วงนี้ (ทำในรอบเดียว)
+        IF iCycState >= 2 THEN
+            iMovFirst := -1;
+            iMovLast  := -1;
+            FOR j := 0 TO iBufN - 1 DO
+                IF axBufMov[j] THEN
+                    IF iMovFirst < 0 THEN
+                        iMovFirst := j;
+                    END_IF
+                    iMovLast := j;
+                END_IF
+            END_FOR
+            lrLegT := 0.0;
+            IF iMovFirst >= 0 THEN
+                // เริ่ม = ตัวอย่างก่อนพบการเคลื่อนที่, ถึงเป้า = ตัวอย่างหลังการเคลื่อนที่ครั้งสุดท้าย
+                iMovFirst := MAX(iMovFirst - 1, 0);
+                iMovLast  := MIN(iMovLast + 1, iBufN - 1);
+                lrLegT := TIME_TO_LREAL(atBuf[iMovLast] - atBuf[iMovFirst]) / 1000.0;
+                FOR j := iMovFirst TO iMovLast DO
+                    IF atBuf[iMovLast] > atBuf[iMovFirst] THEN
+                        lrFrac := TIME_TO_LREAL(atBuf[j] - atBuf[iMovFirst]) / TIME_TO_LREAL(atBuf[iMovLast] - atBuf[iMovFirst]);
+                    ELSE
+                        lrFrac := 1.0;
+                    END_IF
+                    FOR i := 0 TO 5 DO
+                        lrRef := alrLegStart[i] + (alrLegGoal[i] - alrLegStart[i]) * lrFrac;
+                        lrE   := alrBuf[j, i] - lrRef;
+                        IF ABS(lrE) > ABS(alrCycErr[iCyc, i]) THEN
+                            alrCycErr[iCyc, i] := lrE;
+                        END_IF
+                    END_FOR
+                END_FOR
+            END_IF
+            IF iCycState = 2 THEN
+                alrCycTGo[iCyc] := lrLegT;
+            ELSE
+                alrCycTBack[iCyc] := lrLegT;
+            END_IF
+        END_IF
+        tonCycDwell(IN := FALSE);
+        iCycSub := 4;
+    4:  // หยุดรอที่เป้า แล้ววัดความคลาดเคลื่อนขณะหยุดนิ่ง
+        tonCycDwell(IN := TRUE, PT := tCycDwell);
+        IF tonCycDwell.Q THEN
+            tonCycDwell(IN := FALSE);
+            IF iCycState >= 2 THEN
+                FOR i := 0 TO 5 DO
+                    lrE := GVL_ARM.alrAct[i] - alrLegGoal[i];
+                    IF ABS(lrE) > ABS(alrCycStop[iCyc, i]) THEN
+                        alrCycStop[iCyc, i] := lrE;
+                    END_IF
+                END_FOR
+            END_IF
+            iCycSub := 0;
+            IF iCycState = 1 OR iCycState = 3 THEN
+                IF iCyc >= iCycTotal THEN
+                    xCycRun := FALSE;          // ครบทุกรอบ: คำนวณผลสรุปด้านล่าง
+                    iCycState := 9;
+                ELSE
+                    iCyc := iCyc + 1;
+                    iCycState := 2;
+                    sCyc := CONCAT(CONCAT('RUNNING ', INT_TO_STRING(iCyc)), CONCAT('/', INT_TO_STRING(iCycTotal)));
+                END_IF
+            ELSE
+                iCycState := 3;
+            END_IF
+        END_IF
+    END_CASE
+END_IF
+
+// คำนวณผลสรุปเมื่อครบทุกรอบ
+IF (iCycState = 9) AND (NOT xCycRun) THEN
+    FOR i := 0 TO 5 DO
+        lrSum := 0.0; lrSum2 := 0.0;
+        alrSumMax[i] := 0.0; alrSumStop[i] := 0.0;
+        FOR k := 1 TO iCycTotal DO
+            lrSum  := lrSum + alrCycErr[k, i];
+            lrSum2 := lrSum2 + ABS(alrCycErr[k, i]);
+            alrSumMax[i]  := MAX(alrSumMax[i], ABS(alrCycErr[k, i]));
+            alrSumStop[i] := MAX(alrSumStop[i], ABS(alrCycStop[k, i]));
+        END_FOR
+        alrSumMean[i] := lrSum / INT_TO_LREAL(iCycTotal);
+        alrSumMAE[i]  := lrSum2 / INT_TO_LREAL(iCycTotal);
+        lrSum := 0.0;
+        FOR k := 1 TO iCycTotal DO
+            lrSum := lrSum + (alrCycErr[k, i] - alrSumMean[i]) * (alrCycErr[k, i] - alrSumMean[i]);
+        END_FOR
+        IF iCycTotal > 1 THEN
+            alrSumSD[i] := SQRT(lrSum / INT_TO_LREAL(iCycTotal - 1));
+        ELSE
+            alrSumSD[i] := 0.0;
+        END_IF
+    END_FOR
+    lrSum := 0.0; lrSum2 := 0.0;
+    FOR k := 1 TO iCycTotal DO
+        lrSum  := lrSum + alrCycTGo[k];
+        lrSum2 := lrSum2 + alrCycTBack[k];
+    END_FOR
+    lrTGoMean   := lrSum / INT_TO_LREAL(iCycTotal);
+    lrTBackMean := lrSum2 / INT_TO_LREAL(iCycTotal);
+    lrSum := 0.0; lrSum2 := 0.0;
+    FOR k := 1 TO iCycTotal DO
+        lrSum  := lrSum + (alrCycTGo[k] - lrTGoMean) * (alrCycTGo[k] - lrTGoMean);
+        lrSum2 := lrSum2 + (alrCycTBack[k] - lrTBackMean) * (alrCycTBack[k] - lrTBackMean);
+    END_FOR
+    IF iCycTotal > 1 THEN
+        lrTGoSD   := SQRT(lrSum / INT_TO_LREAL(iCycTotal - 1));
+        lrTBackSD := SQRT(lrSum2 / INT_TO_LREAL(iCycTotal - 1));
+    END_IF
+    iCycState := 0;
+    sCyc := CONCAT(CONCAT('DONE ', INT_TO_STRING(iCycTotal)), ' cycles: see alrSum* arrays');
+END_IF
+
+// ---------------- โปรแกรมแบบบล็อก (MoveJ / Speed / Wait / Loop) ทำงานแบบเดียวกับ Program Studio ในแอป PC ----------------
+// MoveJ : ส่ง MOVE ทุกแกนด้วยความเร็วล่าสุด รอ Arduino ตอบรับ รอจนถึงจุด (xInPos) แล้วหยุดรอ tPrgAfterMove
+// Speed : ตั้งความเร็วของ MoveJ ถัดไป 1..100 % (สูตรเดียวกับคำสั่ง S ของแอป: 1..100 % = 100..3000 step/s)
+// Wait  : หยุดรอ lrVal วินาที
+// Loop  : นับรอบของบล็อกนี้ ถ้ายังไม่ครบ lrVal รอบ กลับไปขั้นที่ 1 (ครบแล้วทำขั้นถัดไป) เหมือนแอป PC
+iPrgEdit := LIMIT(1, iPrgEdit, 20);
+
+// นับจำนวนขั้น (จนถึงขั้นแรกที่ว่าง) และหาบล็อก Loop แรก
+iPrgN := 0;
+iPrgFirstLoop := 0;
+FOR iPs := 1 TO 20 DO
+    IF (iPrgN = iPs - 1) AND (aiPrgType[iPs] >= 1) AND (aiPrgType[iPs] <= 4) THEN
+        iPrgN := iPs;
+        IF (aiPrgType[iPs] = 4) AND (iPrgFirstLoop = 0) THEN
+            iPrgFirstLoop := iPs;
+        END_IF
+    END_IF
+END_FOR
+IF iPrgFirstLoop > 0 THEN
+    iPrgLoopN := MAX(1, LREAL_TO_INT(alrPrgVal[iPrgFirstLoop]));
+ELSE
+    iPrgLoopN := 1;
+END_IF
+
+// ---- แก้ไขโปรแกรม (ทำได้เฉพาะตอนไม่ได้รัน) ----
+IF NOT xPrgRun THEN
+    IF xBtnPrgLoad THEN
+        iEdType := aiPrgType[iPrgEdit];
+        FOR i := 0 TO 5 DO
+            alrEdJ[i] := alrPrgJ[iPrgEdit, i];
+        END_FOR
+        lrEdVal := alrPrgVal[iPrgEdit];
+        sPrg := CONCAT('loaded step ', INT_TO_STRING(iPrgEdit));
+    ELSIF xBtnPrgTeach THEN
+        FOR i := 0 TO 5 DO
+            alrEdJ[i] := DINT_TO_LREAL(LREAL_TO_DINT(GVL_ARM.alrAct[i] * 10.0)) / 10.0;   // ปัดเป็น 0.1 องศา
+        END_FOR
+        iEdType := 1;
+        sPrg := 'actual angles copied to J1..J6';
+    ELSIF xBtnPrgSave OR xBtnPrgIns THEN
+        IF (iEdType < 1) OR (iEdType > 4) THEN
+            sPrg := 'type must be 1=MoveJ 2=Speed 3=Wait 4=Loop';
+        ELSIF xBtnPrgIns AND (aiPrgType[20] <> 0) THEN
+            sPrg := 'program is full (20 steps)';
+        ELSE
+            IF xBtnPrgIns THEN                  // เลื่อนขั้น iPrgEdit..19 ลงไปหนึ่งขั้น
+                FOR iPs := 20 TO iPrgEdit + 1 BY -1 DO
+                    aiPrgType[iPs] := aiPrgType[iPs - 1];
+                    alrPrgVal[iPs] := alrPrgVal[iPs - 1];
+                    FOR i := 0 TO 5 DO
+                        alrPrgJ[iPs, i] := alrPrgJ[iPs - 1, i];
+                    END_FOR
+                END_FOR
+            END_IF
+            aiPrgType[iPrgEdit] := iEdType;
+            FOR i := 0 TO 5 DO
+                alrPrgJ[iPrgEdit, i] := alrEdJ[i];
+            END_FOR
+            CASE iEdType OF
+            2:  alrPrgVal[iPrgEdit] := LIMIT(1.0, lrEdVal, 100.0);
+            3:  alrPrgVal[iPrgEdit] := LIMIT(0.0, lrEdVal, 600.0);
+            4:  alrPrgVal[iPrgEdit] := LIMIT(1.0, INT_TO_LREAL(LREAL_TO_INT(lrEdVal)), 100.0);
+            ELSE
+                alrPrgVal[iPrgEdit] := 0.0;
+            END_CASE
+            IF xBtnPrgIns THEN
+                sPrg := CONCAT('inserted step ', INT_TO_STRING(iPrgEdit));
+            ELSE
+                sPrg := CONCAT('saved step ', INT_TO_STRING(iPrgEdit));
+            END_IF
+        END_IF
+    ELSIF xBtnPrgDel THEN
+        FOR iPs := iPrgEdit TO 19 DO               // เลื่อนขั้นถัดไปขึ้นมาหนึ่งขั้น
+            aiPrgType[iPs] := aiPrgType[iPs + 1];
+            alrPrgVal[iPs] := alrPrgVal[iPs + 1];
+            FOR i := 0 TO 5 DO
+                alrPrgJ[iPs, i] := alrPrgJ[iPs + 1, i];
+            END_FOR
+        END_FOR
+        aiPrgType[20] := 0;
+        alrPrgVal[20] := 0.0;
+        FOR i := 0 TO 5 DO
+            alrPrgJ[20, i] := 0.0;
+        END_FOR
+        sPrg := CONCAT('deleted step ', INT_TO_STRING(iPrgEdit));
+    ELSIF xBtnPrgDefault THEN                    // โปรแกรมจุดปากกา 12 ขั้น (ชุดเดียวกับค่าเริ่มต้นใน VAR RETAIN)
+        FOR iPs := 1 TO 20 DO
+            aiPrgType[iPs] := 0;
+            alrPrgVal[iPs] := 0.0;
+            FOR i := 0 TO 5 DO
+                alrPrgJ[iPs, i] := 0.0;
+            END_FOR
+        END_FOR
+        aiPrgType[1] := 1;
+        aiPrgType[2] := 2;   alrPrgVal[2] := 50.0;
+        aiPrgType[3] := 1;   alrPrgJ[3, 0] := 6.0;  alrPrgJ[3, 1] := 40.0;  alrPrgJ[3, 2] := -14.0;  alrPrgJ[3, 3] := -7.0;
+        aiPrgType[4] := 2;   alrPrgVal[4] := 20.0;
+        aiPrgType[5] := 1;   alrPrgJ[5, 0] := 6.0;  alrPrgJ[5, 1] := 51.0;  alrPrgJ[5, 2] := -14.0;  alrPrgJ[5, 3] := -7.0;
+        aiPrgType[6] := 3;   alrPrgVal[6] := 1.0;
+        aiPrgType[7] := 2;   alrPrgVal[7] := 5.0;
+        aiPrgType[8] := 1;   alrPrgJ[8, 0] := 6.0;  alrPrgJ[8, 1] := 52.0;  alrPrgJ[8, 2] := -14.0;  alrPrgJ[8, 3] := -7.0;
+        aiPrgType[9] := 3;   alrPrgVal[9] := 1.0;
+        aiPrgType[10] := 2;  alrPrgVal[10] := 50.0;
+        aiPrgType[11] := 1;
+        aiPrgType[12] := 4;  alrPrgVal[12] := 30.0;
+        sPrg := 'default pen program loaded (12 steps)';
+    END_IF
+END_IF
+
+// ---- เริ่มรัน: ตรวจทุกขั้นก่อน (ขอบเขตแกนเท่ากับ Arduino และกันชน J3 ต่ำกว่า -50 องศาแบบเดียวกับแอป PC) ----
+IF xBtnPrgRun AND (NOT xPrgRun) AND (iTest = 0) AND (NOT xCycRun) AND (NOT xSeqRunning) THEN
+    xPrgBad := FALSE;
+    sPrgTmp := '';
+    FOR iPs := 1 TO iPrgN DO
+        IF (aiPrgType[iPs] = 1) AND NOT xPrgBad THEN
+            IF (ABS(alrPrgJ[iPs, 0]) > 75.0) OR (ABS(alrPrgJ[iPs, 1]) > 60.0) OR (ABS(alrPrgJ[iPs, 2]) > 60.0)
+                    OR (ABS(alrPrgJ[iPs, 3]) > 180.0) OR (ABS(alrPrgJ[iPs, 4]) > 180.0) OR (ABS(alrPrgJ[iPs, 5]) > 180.0) THEN
+                xPrgBad := TRUE;
+                sPrgTmp := CONCAT(CONCAT('step ', INT_TO_STRING(iPs)), ': angle out of range');
+            ELSIF alrPrgJ[iPs, 2] < -50.0 THEN
+                xPrgBad := TRUE;
+                sPrgTmp := CONCAT(CONCAT('step ', INT_TO_STRING(iPs)), ': J3 below -50 deg (self collision)');
+            END_IF
+        END_IF
+    END_FOR
+    IF iPrgN = 0 THEN
+        sPrg := 'program is empty';
+    ELSIF xPrgBad THEN
+        sPrg := sPrgTmp;
+    ELSIF NOT xLinkOK THEN
+        sPrg := 'no link to Arduino';
+    ELSIF NOT xOwner THEN
+        sPrg := 'press REQUEST first';
+    ELSIF xMoving OR fbLink.xBusy OR xAnyFreeNow THEN
+        sPrg := 'wait until the arm stops and all axes are locked';
+    ELSE
+        FOR iPs := 1 TO 20 DO
+            aiPrgLoopCnt[iPs] := 0;
+        END_FOR
+        FOR k := 1 TO 100 DO
+            alrPrgLoopT[k] := 0.0;
+        END_FOR
+        xPrgRun       := TRUE;
+        iPrgStep      := 1;
+        iPrgState     := 0;
+        iPrgLoop      := 1;
+        iPrgLoopsDone := 0;
+        lrPrgLoopT    := 0.0;
+        lrPrgLoopMean := 0.0;
+        lrPrgSpeed    := LIMIT(1.0, lrSpeed, 100.0);     // ก่อนเจอบล็อก Speed ใช้ความเร็วในช่อง SPEED
+        lrJogPend     := 0.0;
+        tonPrgClock(IN := FALSE);
+        tPrgLoopStart := T#0MS;
+        sPrg := 'RUNNING';
+    END_IF
+END_IF
+
+// ---- หยุดหรือยกเลิก ----
+IF xPrgRun THEN
+    IF xBtnStop THEN
+        xPrgRun := FALSE;
+        sPrg := CONCAT(CONCAT('STOPPED at step ', INT_TO_STRING(iPrgStep)), CONCAT(', loop ', INT_TO_STRING(iPrgLoop)));
+    ELSIF NOT xLinkOK OR NOT xOwner THEN
+        xPrgRun  := FALSE;
+        xStopCmd := TRUE;
+        sPrg := CONCAT('ABORTED (link/control lost) at step ', INT_TO_STRING(iPrgStep));
+    END_IF
+END_IF
+
+// ---- ทำทีละขั้น ----
+IF xPrgRun THEN
+    tonPrgClock(IN := TRUE, PT := T#24H);
+    iPrgWait := iPrgWait + 1;
+    CASE iPrgState OF
+    0:  // เริ่มขั้นที่ iPrgStep (Speed และ Loop ทำเสร็จในรอบเดียว)
+        IF iPrgStep > iPrgN THEN
+            xPrgRun := FALSE;
+            IF iPrgLoopsDone = 0 THEN           // โปรแกรมไม่มีบล็อก Loop: ทั้งโปรแกรมคือ 1 รอบ
+                iPrgLoopsDone := 1;
+                lrPrgLoopT    := TIME_TO_LREAL(tonPrgClock.ET) / 1000.0;
+                lrPrgLoopMean := lrPrgLoopT;
+                alrPrgLoopT[1] := lrPrgLoopT;
+            END_IF
+            sPrg := CONCAT(CONCAT('DONE: ', INT_TO_STRING(iPrgLoopsDone)),
+                           CONCAT(' loops, mean ', CONCAT(F_Fix1(lrPrgLoopMean), ' s/loop')));
+        ELSE
+            CASE aiPrgType[iPrgStep] OF
+            1:  // MoveJ
+                FOR i := 0 TO 5 DO
+                    GVL_ARM.alrCmd[i] := alrPrgJ[iPrgStep, i];
+                END_FOR
+                xMoveCmd := TRUE;
+                iPrgWait := 0;
+                tonPrgLimit(IN := FALSE);
+                iPrgState := 1;
+            2:  // Speed
+                lrPrgSpeed := LIMIT(1.0, alrPrgVal[iPrgStep], 100.0);
+                iPrgStep := iPrgStep + 1;
+            3:  // Wait
+                tonPrg(IN := FALSE);
+                iPrgState := 3;
+            4:  // Loop
+                aiPrgLoopCnt[iPrgStep] := aiPrgLoopCnt[iPrgStep] + 1;
+                IF iPrgStep = iPrgFirstLoop THEN    // จบหนึ่งรอบ: เก็บเวลาของรอบ
+                    iPrgLoopsDone := aiPrgLoopCnt[iPrgStep];
+                    lrPrgLoopT := TIME_TO_LREAL(tonPrgClock.ET - tPrgLoopStart) / 1000.0;
+                    tPrgLoopStart := tonPrgClock.ET;
+                    IF iPrgLoopsDone <= 100 THEN
+                        alrPrgLoopT[iPrgLoopsDone] := lrPrgLoopT;
+                    END_IF
+                    lrPrgLoopMean := TIME_TO_LREAL(tonPrgClock.ET) / 1000.0 / INT_TO_LREAL(iPrgLoopsDone);
+                END_IF
+                IF INT_TO_LREAL(aiPrgLoopCnt[iPrgStep]) < alrPrgVal[iPrgStep] THEN
+                    IF iPrgStep = iPrgFirstLoop THEN
+                        iPrgLoop := aiPrgLoopCnt[iPrgStep] + 1;
+                    END_IF
+                    iPrgStep := 1;
+                ELSE
+                    aiPrgLoopCnt[iPrgStep] := 0;
+                    iPrgStep := iPrgStep + 1;
+                END_IF
+            ELSE
+                iPrgStep := iPrgN + 1;
+            END_CASE
+        END_IF
+    1:  // รอ Arduino ตอบรับ MoveJ
+        IF iPrgWait >= 2 AND NOT fbLink.xBusy THEN
+            IF fbLink.xError THEN
+                xPrgRun := FALSE;
+                sPrg := CONCAT(CONCAT('ABORTED step ', INT_TO_STRING(iPrgStep)), CONCAT(': ', fbLink.sResult));
+            ELSE
+                iPrgState := 2;
+            END_IF
+        END_IF
+    2:  // รอจนถึงจุด
+        tonPrgLimit(IN := TRUE, PT := tMoveLimit);
+        IF xInPos THEN
+            tonPrgLimit(IN := FALSE);
+            tonPrg(IN := FALSE);
+            iPrgState := 4;
+        ELSIF tonPrgLimit.Q THEN
+            tonPrgLimit(IN := FALSE);
+            xPrgRun  := FALSE;
+            xStopCmd := TRUE;
+            sPrg := CONCAT(CONCAT('ABORTED step ', INT_TO_STRING(iPrgStep)), ': target not reached');
+        END_IF
+    3:  // Wait
+        tonPrg(IN := TRUE, PT := LREAL_TO_TIME(alrPrgVal[iPrgStep] * 1000.0));
+        IF tonPrg.Q THEN
+            tonPrg(IN := FALSE);
+            iPrgStep  := iPrgStep + 1;
+            iPrgState := 0;
+        END_IF
+    4:  // หยุดรอหลังถึงจุด
+        tonPrg(IN := TRUE, PT := tPrgAfterMove);
+        IF tonPrg.Q THEN
+            tonPrg(IN := FALSE);
+            iPrgStep  := iPrgStep + 1;
+            iPrgState := 0;
+        END_IF
+    END_CASE
+    IF xPrgRun THEN
+        sPrg := CONCAT(CONCAT(CONCAT('RUNNING step ', INT_TO_STRING(iPrgStep)), CONCAT('/', INT_TO_STRING(iPrgN))),
+                       CONCAT(CONCAT('  loop ', INT_TO_STRING(iPrgLoop)), CONCAT('/', INT_TO_STRING(iPrgLoopN))));
+    END_IF
+ELSE
+    tonPrgClock(IN := FALSE);
+    tonPrg(IN := FALSE);
+    tonPrgLimit(IN := FALSE);
+END_IF
+
+// ---- ข้อความของแต่ละขั้นสำหรับตารางในหน้า Visu ----
+FOR iPs := 1 TO 20 DO
+    IF xPrgRun AND (iPs = iPrgStep) THEN
+        sPrgTmp := CONCAT('>> #', INT_TO_STRING(iPs));
+    ELSE
+        sPrgTmp := CONCAT('   #', INT_TO_STRING(iPs));
+    END_IF
+    IF iPs > iPrgN THEN
+        IF iPs = iPrgN + 1 THEN
+            asPrgText[iPs] := CONCAT(sPrgTmp, '  (end)');
+        ELSE
+            asPrgText[iPs] := '';
+        END_IF
+    ELSE
+        CASE aiPrgType[iPs] OF
+        1:  asPrgText[iPs] := CONCAT(CONCAT(CONCAT(CONCAT(sPrgTmp, '  MoveJ  '), F_Fix1(alrPrgJ[iPs, 0])),
+                                   CONCAT(', ', F_Fix1(alrPrgJ[iPs, 1]))),
+                            CONCAT(CONCAT(CONCAT(', ', F_Fix1(alrPrgJ[iPs, 2])), CONCAT(', ', F_Fix1(alrPrgJ[iPs, 3]))),
+                                   CONCAT(CONCAT(', ', F_Fix1(alrPrgJ[iPs, 4])), CONCAT(', ', F_Fix1(alrPrgJ[iPs, 5])))));
+        2:  asPrgText[iPs] := CONCAT(CONCAT(CONCAT(sPrgTmp, '  Speed  '), F_Fix1(alrPrgVal[iPs])), ' %');
+        3:  asPrgText[iPs] := CONCAT(CONCAT(CONCAT(sPrgTmp, '  Wait  '), F_Fix1(alrPrgVal[iPs])), ' s');
+        4:  asPrgText[iPs] := CONCAT(CONCAT(CONCAT(sPrgTmp, '  Loop  '), INT_TO_STRING(LREAL_TO_INT(alrPrgVal[iPs]))),
+                                   CONCAT('  (done ', CONCAT(INT_TO_STRING(aiPrgLoopCnt[iPs]), ')')));
+        END_CASE
+    END_IF
+END_FOR
+IF (NOT xPrgRun) AND (sPrg = '') THEN
+    sPrg := 'READY';
+END_IF
+
+// ---------------- ส่ง jog ----------------
+// ส่งเมื่อ Arduino ตอบคำสั่งก่อนหน้าครบแล้ว (fbLink ว่าง 2 รอบติด) และรอบนี้ไม่มีคำสั่งอื่น: กดรัวๆ ระยะจะรวมกันไม่หาย
+// แกนที่เลือกไปจากเป้าหมายปัจจุบันของ Arduino (alrTgt) อีก lrJogPend องศา ส่วนแกนอื่นไม่ถูกสั่ง (mask เฉพาะแกนนี้)
+// ใช้เป้าหมาย ไม่ใช่มุมจริง เพื่อให้กดต่อกันระหว่างที่ยังหมุนอยู่แล้วระยะครบ
+IF (lrJogPend <> 0.0) AND (iTest = 0) AND (NOT xCycRun) AND (NOT xPrgRun) AND NOT (xSeqRunning OR fbLink.xBusy OR xBusyPrev OR xMoveCmd OR xStopCmd
+        OR xBtnRequest OR xBtnRelease OR xBtnFreeAll OR xBtnLockAll) THEN
+    FOR i := 0 TO 5 DO
+        GVL_ARM.alrCmd[i] := GVL_ARM.alrTgt[i];
+    END_FOR
+    GVL_ARM.alrCmd[iJogIdx] := GVL_ARM.alrTgt[iJogIdx] + lrJogPend;
+    alrManual[iJogIdx] := GVL_ARM.alrCmd[iJogIdx];     // ช่องเป้าหมายแสดงค่าใหม่ด้วย
+    lrJogPend := 0.0;
+    xJogCmd   := TRUE;
+    xMoveCmd  := TRUE;
+END_IF
+xBusyPrev := fbLink.xBusy;
+
 // ---------------- คุยกับ Arduino ----------------
+lrSpeedUse := lrSpeed;
+wMaskUse   := 16#003F;
+IF xJogCmd THEN
+    wMaskUse := SHL(WORD#1, iJogIdx);   // jog สั่งเฉพาะแกนที่เลือก
+END_IF
+IF iTest > 0 THEN
+    lrSpeedUse := TEST_SPEED;
+    wMaskUse   := 16#0001;              // ระหว่างทดสอบสั่งเฉพาะ J1
+END_IF
+IF xCycRun THEN
+    lrSpeedUse := lrCycSpeed;
+    wMaskUse   := 16#003F;              // ทดสอบ 30 รอบสั่งทุกแกน
+END_IF
+IF xPrgRun THEN
+    lrSpeedUse := lrPrgSpeed;           // ความเร็วจากบล็อก Speed ล่าสุด
+    wMaskUse   := 16#003F;              // MoveJ สั่งทุกแกน
+END_IF
+
 fbLink(
-    xRequest   := xBtnRequest,
-    xRelease   := xBtnRelease,
+    xRequest   := xBtnRequest OR xTestReq,
+    xRelease   := xBtnRelease OR xTestRel,
     xStop      := xStopCmd,
     xMove      := xMoveCmd,
-    xFree      := xBtnFreeAll,
-    xLock      := xBtnLockAll,
-    lrSpeedPct := lrSpeed,
-    wAxisMask  := 16#003F);
+    xFree      := xBtnFreeAll AND (iTest = 0) AND NOT xPrgRun,
+    xLock      := xBtnLockAll AND (iTest = 0) AND NOT xPrgRun,
+    lrSpeedPct := lrSpeedUse,
+    wAxisMask  := wMaskUse);
 
 xLinkOK := fbLink.xLinkOK;
 xOwner  := fbLink.xOwner;
 xMoving := fbLink.xMoving;
+xAnyFreeNow := fbLink.xAnyFree;
 
 // ถึงเป้าเมื่อหยุดนิ่ง ไม่มีคำสั่งค้าง และทุกแกนห่างจากเป้าที่สั่งล่าสุดไม่เกิน lrTol
 lrErrMax := 0.0;
@@ -149,3 +923,16 @@ xBtnGoPoint  := FALSE;
 xBtnFreeAll  := FALSE;
 xBtnLockAll  := FALSE;
 xBtnRunSeq   := FALSE;
+xBtnSelfTest := FALSE;
+xBtnCopyAct  := FALSE;
+xBtnHome     := FALSE;
+xBtnJogPlus  := FALSE;
+xBtnJogMinus := FALSE;
+xBtnCycleTest := FALSE;
+xBtnPrgRun     := FALSE;
+xBtnPrgLoad    := FALSE;
+xBtnPrgSave    := FALSE;
+xBtnPrgIns     := FALSE;
+xBtnPrgDel     := FALSE;
+xBtnPrgTeach   := FALSE;
+xBtnPrgDefault := FALSE;
